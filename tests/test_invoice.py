@@ -19,6 +19,8 @@ SAMPLE_PDF = Path(__file__).resolve().parents[1] / "PS MB 31308266 Oct-07-2026.p
 # amount on each G/L row is the tax-included total and must be ignored.
 EXAMPLE_TEXT = """
 Invoice #:        31278945 RI
+Invoice Date:     10/05/2026
+Order Date:       10/02/2026
 GST / HST / TPS                5.000%    175.07
 PST - MB                       7.000%      6.00
 510                                   181.07 Amount Due 10/12/2026    19,181.40
@@ -53,6 +55,10 @@ def _example_pdf():
     document.setFont("Courier", 10)
     document.drawString(72, 740, "Invoice #:")
     document.drawString(220, 740, "31278945 RI")
+    document.drawString(72, 724, "Invoice Date:")
+    document.drawString(220, 724, "10/05/2026")
+    document.drawString(72, 708, "Order Date:")
+    document.drawString(220, 708, "10/02/2026")
     document.drawString(72, 700, "GST / HST / TPS")
     document.drawString(280, 700, "5.000%")
     document.drawString(360, 700, "175.07")
@@ -87,6 +93,7 @@ def _example_pdf():
 
 def _assert_example(record):
     assert record["invoice_number"] == "31278945"
+    assert record["invoice_date"] == "10/05/2026"
     assert record["pst"] == "6.00"
     assert record["gst_hst_tps"] == "175.07"
     assert record["amount_due_date"] == "10/12/2026"
@@ -129,6 +136,7 @@ def test_unrecognized_pdf_explains_what_is_missing():
 def test_supplier_invoice_pdf():
     record = parse_invoice_bytes(SAMPLE_PDF.read_bytes())
     assert record["invoice_number"] == "31308266"
+    assert record["invoice_date"] == "10/07/2026"
     assert record["pst"] == "18.18"
     assert record["gst_hst_tps"] == "318.51"
     assert record["amount_due_date"] == "10/14/2026"
@@ -148,6 +156,7 @@ def test_cli_prints_json_for_the_supplier_invoice():
     assert result.exit_code == 0, result.output
     record = json.loads(result.output)
     assert record["invoice_number"] == "31308266"
+    assert record["invoice_date"] == "10/07/2026"
     assert record["accounts"]["7001-001"]["net"] == "25921.00"
 
 
@@ -160,8 +169,9 @@ def test_cli_writes_csv(tmp_path):
     )
     assert result.exit_code == 0, result.output
     text = destination.read_text(encoding="utf-8")
-    assert "Invoice Number" in text.splitlines()[0]
+    assert "Invoice Date" in text.splitlines()[0]
     assert "31308266" in text
+    assert "10/07/2026" in text
     assert "25921.00" in text
     assert "32044.02" in text
 
@@ -177,6 +187,8 @@ def test_web_page_shows_supplier_invoice(client):
     body = response.get_data(as_text=True)
     assert response.status_code == 200
     assert "31308266" in body
+    assert "Invoice Date" in body
+    assert "10/07/2026" in body
     assert "10/14/2026" in body
     assert "18.18" in body
     assert "318.51" in body
@@ -198,6 +210,7 @@ def test_web_json_and_csv(client):
     )
     assert as_json.status_code == 200
     assert as_json.get_json()["invoice_number"] == "31278945"
+    assert as_json.get_json()["invoice_date"] == "10/05/2026"
     assert as_json.get_json()["accounts"]["7001-001"]["net"] == "15642.81"
 
     as_csv = client.post(
@@ -207,6 +220,8 @@ def test_web_json_and_csv(client):
     )
     assert as_csv.status_code == 200
     assert "text/csv" in as_csv.content_type
+    assert b"10/05/2026" in as_csv.data
+    assert b"10/02/2026" not in as_csv.data
     assert b"15642.81" in as_csv.data
     assert b"19181.40" in as_csv.data
 

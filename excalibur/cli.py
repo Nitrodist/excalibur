@@ -106,7 +106,7 @@ def run(*args, **kwargs):
     help="Write the result to this file instead of printing it.",
 )
 def invoice(pdf, fmt, output):
-    """Read invoice number, taxes, due date, G/L nets, and total from a PDF.
+    """Read invoice number, invoice date, taxes, due date, G/L nets, and total.
 
     Account amounts are the Net column (before tax) on the G/L summary.
     """

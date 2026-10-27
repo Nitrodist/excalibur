@@ -23,6 +23,7 @@ KNOWN_ACCOUNTS = (
 
 _MONEY = r"(-?\d[\d,]*\.\d{2}-?)"
 _INVOICE_NUMBER = re.compile(r"Invoice\s*#:\s*(\d+)")
+_INVOICE_DATE = re.compile(r"Invoice Date:\s*(\d{1,2}/\d{1,2}/\d{4})")
 _GST = re.compile(rf"GST\s*/\s*HST\s*/\s*TPS\s+[\d.]+\s*%\s+({_MONEY})")
 _PST = re.compile(rf"PST(?:\s*-\s*[A-Z]{{2}})?\s+[\d.]+\s*%\s+({_MONEY})")
 _AMOUNT_DUE = re.compile(
@@ -65,6 +66,7 @@ def parse_invoice_bytes(data):
 def parse_invoice_text(text):
     """Parse invoice fields from layout-preserved text."""
     invoice_match = _INVOICE_NUMBER.search(text)
+    invoice_date_match = _INVOICE_DATE.search(text)
     gst_match = _GST.search(text)
     pst_match = _PST.search(text)
     due_match = _AMOUNT_DUE.search(text)
@@ -73,6 +75,8 @@ def parse_invoice_text(text):
     missing = []
     if not invoice_match:
         missing.append("Invoice #")
+    if not invoice_date_match:
+        missing.append("Invoice Date")
     if not gst_match:
         missing.append("GST / HST / TPS")
     if not pst_match:
@@ -88,6 +92,7 @@ def parse_invoice_text(text):
 
     record = {
         "invoice_number": invoice_match.group(1),
+        "invoice_date": _normalize_date(invoice_date_match.group(1)),
         "pst": format_money(parse_money(pst_match.group(1))),
         "gst_hst_tps": format_money(parse_money(gst_match.group(1))),
         "amount_due_date": _normalize_date(due_match.group(1)),
@@ -113,12 +118,14 @@ def to_csv(record):
 
     headers = [
         "Invoice Number",
+        "Invoice Date",
         "PST",
         "GST / HST / TPS",
         "Amount Due",
     ]
     values = [
         record["invoice_number"],
+        record["invoice_date"],
         record["pst"],
         record["gst_hst_tps"],
         record["amount_due_date"],
@@ -140,6 +147,7 @@ def display_rows(record):
     """Label/value pairs for the web page, with money grouped in thousands."""
     rows = [
         ("Invoice Number", record["invoice_number"]),
+        ("Invoice Date", record["invoice_date"]),
         ("PST", _display_money(record["pst"])),
         ("GST / HST / TPS", _display_money(record["gst_hst_tps"])),
         ("Amount Due", record["amount_due_date"]),
