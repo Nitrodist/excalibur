@@ -101,12 +101,16 @@ You can install the development dependencies easily, using pip:
 $ pip install excalibur-py[dev]
 </pre>
 
-### Testing (soon)
+### Testing
 
 After installation, you can run tests using:
 
 <pre>
-$ python setup.py test
+$ make test
+
+# Or
+
+$ pytest --verbose tests
 </pre>
 
 ## Versioning
