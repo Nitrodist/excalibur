@@ -218,6 +218,7 @@ def _accounts(section):
 
     accounts = {}
     warnings = []
+    # Standard accounts stay in the output even when this invoice omits them.
     for code, canonical in KNOWN_ACCOUNTS:
         if code in found:
             description, net = found.pop(code)
@@ -227,7 +228,6 @@ def _accounts(section):
             }
         else:
             accounts[code] = {"description": canonical, "net": None}
-            warnings.append(f"{code} {canonical} was not found")
     for code in sorted(found):
         description, net = found[code]
         accounts[code] = {"description": description, "net": format_money(net)}
@@ -238,8 +238,10 @@ def _reconciliation_warning(record):
     nets = []
     for account in record["accounts"].values():
         if account["net"] is None:
-            return None
+            continue
         nets.append(Decimal(account["net"]))
+    if not nets:
+        return None
     expected = sum(nets, Decimal("0"))
     expected += Decimal(record["pst"]) + Decimal(record["gst_hst_tps"])
     expected = expected.quantize(Decimal("0.01"))

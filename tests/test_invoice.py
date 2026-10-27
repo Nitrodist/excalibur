@@ -13,6 +13,7 @@ from excalibur.www.app import create_app
 from excalibur import configuration as conf
 
 SAMPLE_PDF = Path(__file__).resolve().parents[1] / "PS MB 31308266 Oct-07-2026.pdf"
+APPAREL_PDF = Path(__file__).resolve().parents[1] / "GP MB 30039178 Feb-11-2026.pdf"
 
 # Figures from a different invoice, used to lock which column is read.
 # The Net column plus PST and GST equals Total Order. The last money
@@ -120,11 +121,22 @@ def test_example_pdf_round_trip():
     _assert_example(parse_invoice_bytes(_example_pdf()))
 
 
-def test_missing_account_is_reported():
-    text = EXAMPLE_TEXT.replace("7426-001  TOY PROMOTION                      2        87.51       0.20        87.71\n", "")
+def test_missing_standard_account_stays_in_the_output():
+    text = EXAMPLE_TEXT.replace(
+        "7426-001  TOY PROMOTION                      2        87.51       0.20        87.71\n",
+        "",
+    )
     record = parse_invoice_text(text)
+    assert list(record["accounts"])[:5] == [code for code, _description in (
+        ("7001-001", "FOOD"),
+        ("7030-001", "PAPER"),
+        ("7420-001", "OPERATING SUPPLIES"),
+        ("7426-001", "TOY PROMOTION"),
+        ("7428-001", "GIVE AWAY PROMO"),
+    )]
     assert record["accounts"]["7426-001"]["net"] is None
-    assert "7426-001 TOY PROMOTION was not found" in record["warnings"]
+    assert record["warnings"]
+    assert "was not found" not in record["warnings"][0]
 
 
 def test_unrecognized_pdf_explains_what_is_missing():
@@ -147,6 +159,38 @@ def test_supplier_invoice_pdf():
     assert record["accounts"]["7420-001"]["net"] == "259.70"
     assert record["accounts"]["7426-001"]["net"] == "971.93"
     assert record["accounts"]["7428-001"]["net"] == "905.41"
+
+
+@pytest.mark.skipif(not APPAREL_PDF.is_file(), reason="apparel invoice PDF is not in the repo")
+def test_extra_gl_account_is_added_after_the_standard_rows():
+    record = parse_invoice_bytes(APPAREL_PDF.read_bytes())
+    assert record["invoice_number"] == "30039178"
+    assert record["invoice_date"] == "02/11/2026"
+    assert record["pst"] == "47.01"
+    assert record["gst_hst_tps"] == "183.74"
+    assert record["amount_due_date"] == "02/18/2026"
+    assert record["total_order"] == "18959.00"
+    assert record["warnings"] == []
+    assert list(record["accounts"]) == [
+        "7001-001",
+        "7030-001",
+        "7420-001",
+        "7426-001",
+        "7428-001",
+        "7440-001",
+    ]
+    assert record["accounts"]["7001-001"]["net"] == "15055.46"
+    assert record["accounts"]["7030-001"]["net"] == "2493.26"
+    assert record["accounts"]["7420-001"]["net"] == "636.55"
+    assert record["accounts"]["7426-001"]["net"] == "318.38"
+    assert record["accounts"]["7428-001"] == {
+        "description": "GIVE AWAY PROMO",
+        "net": None,
+    }
+    assert record["accounts"]["7440-001"] == {
+        "description": "APPAREL ACCESSORY",
+        "net": "224.60",
+    }
 
 
 def test_cli_prints_json_for_the_supplier_invoice():
@@ -199,6 +243,30 @@ def test_web_page_shows_supplier_invoice(client):
     assert "905.41" in body
     assert "32,044.02" in body
     assert "31278945" not in body
+
+
+def test_web_page_lists_standard_accounts_and_extra_ones(client):
+    if not APPAREL_PDF.is_file():
+        pytest.skip("apparel invoice PDF is not in the repo")
+    response = client.post(
+        "/invoice",
+        data={"file": (BytesIO(APPAREL_PDF.read_bytes()), APPAREL_PDF.name)},
+        content_type="multipart/form-data",
+    )
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "7001-001 FOOD" in body
+    assert "7030-001 PAPER" in body
+    assert "7420-001 OPERATING SUPPLIES" in body
+    assert "7426-001 TOY PROMOTION" in body
+    assert "7428-001 GIVE AWAY PROMO" in body
+    assert "7440-001 APPAREL ACCESSORY" in body
+    giveaway = body.index("7428-001 GIVE AWAY PROMO")
+    apparel = body.index("7440-001 APPAREL ACCESSORY")
+    assert giveaway < apparel
+    assert "—" in body
+    assert "224.60" in body
+    assert "was not found" not in body
 
 
 def test_web_json_and_csv(client):
