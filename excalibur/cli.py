@@ -5,6 +5,7 @@ import click
 
 from . import __version__, settings
 from . import configuration as conf
+from .invoices import InvoiceParseError, parse_invoice, to_csv, to_json
 from .operators.python_operator import PythonOperator
 from .tasks import extract, split
 from .utils.database import initialize_database, reset_database
@@ -86,3 +87,38 @@ def worker(*args, **kwargs):
 @click.option("-id", "--uuid")
 def run(*args, **kwargs):
     _run(kwargs["task"], kwargs["uuid"])
+
+
+@cli.command("invoice")
+@click.argument("pdf", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["json", "csv"]),
+    default="json",
+    show_default=True,
+    help="json for programs, csv for a spreadsheet.",
+)
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(dir_okay=False),
+    help="Write the result to this file instead of printing it.",
+)
+def invoice(pdf, fmt, output):
+    """Read invoice number, taxes, due date, G/L nets, and total from a PDF.
+
+    Account amounts are the Net column (before tax) on the G/L summary.
+    """
+    try:
+        record = parse_invoice(pdf)
+    except InvoiceParseError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    payload = to_json(record) if fmt == "json" else to_csv(record)
+    if output:
+        with open(output, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+        click.echo(f"Wrote {output}")
+        return
+    click.echo(payload, nl=False)

@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% set active_page = "invoice" %}
+{% block stylesheet %}
+{% endblock %}
+
+{% block invoice %}
+<div class="container">
+  <div class="row mb-4 border-bottom mb-5">
+    <div class="col-md-12 text-center">
+      <h1 class="display-4">Invoice</h1>
+      <p class="lead">Extract the summary fields from a Martin-Brower invoice PDF</p>
+    </div>
+  </div>
+
+  <form class="mb-5" method="post" enctype="multipart/form-data" action="/invoice">
+    <div class="row align-items-center">
+      <div class="col-md-8 col-sm-8 col-xs-12">
+        <div class="input-group">
+          <div class="custom-file uploadFile">
+            <input type="file" class="uploadFile__input" id="invoice-file" name="file" accept="application/pdf" required>
+            <label for="invoice-file" class="uploadFile__label">Upload PDF</label>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-4 col-sm-4 col-xs-12 py-2">
+        <button type="submit" id="extract" class="btn btn-primary btn-block">Extract invoice</button>
+      </div>
+    </div>
+  </form>
+
+  {% if error %}
+    <div class="alert alert-danger" role="alert">{{ error }}</div>
+  {% endif %}
+
+  {% if warnings %}
+    <div class="alert alert-warning" role="alert">
+      {% for warning in warnings %}
+        <div>{{ warning }}</div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  {% if rows %}
+    <h5 class="card-title py-3 mb-0 text-dark font-weight-bold">{{ filename }}</h5>
+    <div class="card depth-1 mb-3">
+      <div class="card-body p-0">
+        <table class="table text-left table-borderless mb-0">
+          <tbody>
+            {% for label, value in rows %}
+              <tr>
+                <th scope="row" class="w-50">{{ label }}</th>
+                <td class="text-right font-weight-bold">{{ value }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <p class="text-muted">Account amounts are the Net column, before tax. PST and GST are the dollar amounts, not the rates.</p>
+    <p>
+      <button type="button" class="btn btn-outline-primary" id="download-csv" data-filename="{{ download_name }}">Download CSV</button>
+      <button type="button" class="btn btn-outline-secondary" id="download-json" data-filename="{{ download_name }}">Download JSON</button>
+    </p>
+    <script type="application/json" id="invoice-json">{{ invoice_json | safe }}</script>
+    <pre id="invoice-csv" class="d-none">{{ invoice_csv }}</pre>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block javascript %}
+<script type="text/javascript" src="{{ url_for('static', filename='js/invoice.js') }}"></script>
+{% endblock %}

@@ -1,6 +1,7 @@
 import datetime as dt
 import glob
 import json
+import logging
 import os
 import re
 import sys
@@ -8,6 +9,7 @@ import sys
 import pandas as pd
 from flask import (
     Blueprint,
+    Response,
     jsonify,
     request,
     url_for,
@@ -18,6 +20,12 @@ from flask import (
 from werkzeug.utils import secure_filename
 
 from .. import configuration as conf
+from ..invoices import (
+    InvoiceParseError,
+    display_rows,
+    parse_invoice_bytes,
+    to_csv,
+)
 from ..models import Job, File, Rule
 from ..settings import Session
 from ..executors import get_default_executor
@@ -272,4 +280,79 @@ def download():
     filename = os.path.basename(zipfile)
     return send_from_directory(
         directory=directory, path=filename, as_attachment=True
+    )
+
+
+_MAX_INVOICE_BYTES = 20 * 1024 * 1024
+
+
+def _invoice_error(message, fmt, status):
+    if fmt == "json":
+        return jsonify(error=message), status
+    if fmt == "csv":
+        return Response(message + "\n", mimetype="text/plain", status=status)
+    return (
+        render_template(
+            "invoice.html",
+            rows=None,
+            error=message,
+            warnings=None,
+            filename=None,
+        ),
+        status,
+    )
+
+
+@views.route("/invoice", methods=["GET", "POST"])
+def invoice():
+    if request.method == "GET":
+        return render_template(
+            "invoice.html",
+            rows=None,
+            error=None,
+            warnings=None,
+            filename=None,
+        )
+
+    fmt = (request.args.get("format") or request.form.get("format") or "html").lower()
+    upload = request.files.get("file") or request.files.get("file-0")
+    if upload is None or not upload.filename:
+        return _invoice_error("Choose a PDF to extract.", fmt, 400)
+    if not upload.filename.lower().endswith(".pdf"):
+        return _invoice_error("Upload a PDF file.", fmt, 400)
+
+    data = upload.read()
+    if len(data) > _MAX_INVOICE_BYTES:
+        return _invoice_error("PDF is larger than 20 MB.", fmt, 400)
+    try:
+        record = parse_invoice_bytes(data)
+    except InvoiceParseError as exc:
+        return _invoice_error(str(exc), fmt, 422)
+    except Exception:
+        logging.exception("Failed to extract invoice fields")
+        return _invoice_error(
+            "Could not read this PDF as a supplier invoice.", fmt, 500
+        )
+
+    if fmt == "json":
+        return jsonify(record)
+    if fmt == "csv":
+        download = f"invoice-{record['invoice_number']}.csv"
+        return Response(
+            to_csv(record),
+            mimetype="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{download}"'},
+        )
+    if fmt != "html":
+        return _invoice_error("Format must be html, json, or csv.", fmt, 400)
+
+    return render_template(
+        "invoice.html",
+        rows=display_rows(record),
+        error=None,
+        warnings=record["warnings"],
+        filename=upload.filename,
+        invoice_json=json.dumps(record).replace("<", "\\u003c"),
+        invoice_csv=to_csv(record),
+        download_name=f"invoice-{record['invoice_number']}",
     )

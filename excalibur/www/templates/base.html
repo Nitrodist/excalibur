@@ -31,6 +31,7 @@
       <!-- http://jinja.pocoo.org/docs/2.10/tricks/#highlighting-active-menu-items -->
       {% set navigation_bar = [
           ('/files', 'files', 'Files'),
+          ('/invoice', 'invoice', 'Invoice'),
           ('/rules', 'rules', 'Rules'),
           ('/jobs', 'jobs', 'Jobs')
       ] -%}
@@ -58,6 +59,7 @@
     </nav>
 
     {% block files %}{% endblock %}
+    {% block invoice %}{% endblock %}
     {% block workspace %}{% endblock %}
     {% block rules %}{% endblock %}
     {% block jobs %}{% endblock %}
