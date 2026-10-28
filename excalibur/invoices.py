@@ -143,6 +143,67 @@ def to_csv(record):
     return buffer.getvalue()
 
 
+def to_batch_csv(entries):
+    """One header and one row per invoice.
+
+    Standard G/L columns are always present. Accounts that appear on only
+    some of the invoices are added after those columns, and left blank on
+    the invoices that do not have them.
+    """
+    import csv
+    import io
+
+    columns, descriptions = _batch_account_columns(
+        [entry["record"] for entry in entries]
+    )
+    headers = [
+        "Filename",
+        "Invoice Number",
+        "Invoice Date",
+        "PST",
+        "GST / HST / TPS",
+        "Amount Due",
+    ]
+    headers.extend(f"{code} {descriptions[code]}" for code in columns)
+    headers.append("Total Order")
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\n")
+    writer.writerow(headers)
+    for entry in entries:
+        record = entry["record"]
+        row = [
+            entry["filename"],
+            record["invoice_number"],
+            record["invoice_date"],
+            record["pst"],
+            record["gst_hst_tps"],
+            record["amount_due_date"],
+        ]
+        for code in columns:
+            account = record["accounts"].get(code) or {}
+            row.append(account.get("net") or "")
+        row.append(record["total_order"])
+        writer.writerow(row)
+    return buffer.getvalue()
+
+
+def _batch_account_columns(records):
+    descriptions = {code: description for code, description in KNOWN_ACCOUNTS}
+    extras = []
+    seen = set(descriptions)
+    for record in records:
+        for code, account in record["accounts"].items():
+            if account.get("description"):
+                descriptions[code] = account["description"]
+            if code not in seen:
+                seen.add(code)
+                extras.append(code)
+    extras.sort()
+    columns = [code for code, _description in KNOWN_ACCOUNTS] + extras
+    return columns, descriptions
+
+
 def display_rows(record):
     """Label/value pairs for the web page, with money grouped in thousands."""
     rows = [

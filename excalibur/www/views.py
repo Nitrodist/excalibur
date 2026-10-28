@@ -22,8 +22,10 @@ from werkzeug.utils import secure_filename
 from .. import configuration as conf
 from ..invoices import (
     InvoiceParseError,
+    _display_money,
     display_rows,
     parse_invoice_bytes,
+    to_batch_csv,
     to_csv,
 )
 from ..models import Job, File, Rule
@@ -355,4 +357,110 @@ def invoice():
         invoice_json=json.dumps(record).replace("<", "\\u003c"),
         invoice_csv=to_csv(record),
         download_name=f"invoice-{record['invoice_number']}",
+    )
+
+
+def _bulk_error(message, fmt, status):
+    if fmt == "csv":
+        return Response(message + "\n", mimetype="text/plain", status=status)
+    return (
+        render_template(
+            "bulk.html",
+            error=message,
+            failures=None,
+            summaries=None,
+        ),
+        status,
+    )
+
+
+@views.route("/bulk", methods=["GET", "POST"])
+def bulk():
+    if request.method == "GET":
+        return render_template(
+            "bulk.html",
+            error=None,
+            failures=None,
+            summaries=None,
+        )
+
+    fmt = (request.args.get("format") or request.form.get("format") or "html").lower()
+    uploads = [
+        upload
+        for upload in request.files.getlist("files")
+        if upload is not None and upload.filename
+    ]
+    if len(uploads) < 2:
+        return _bulk_error("Choose at least two PDFs.", fmt, 400)
+
+    entries = []
+    failures = []
+    for upload in uploads:
+        filename = upload.filename
+        if not filename.lower().endswith(".pdf"):
+            failures.append({"filename": filename, "error": "Not a PDF."})
+            continue
+        data = upload.read()
+        if len(data) > _MAX_INVOICE_BYTES:
+            failures.append(
+                {"filename": filename, "error": "PDF is larger than 20 MB."}
+            )
+            continue
+        try:
+            record = parse_invoice_bytes(data)
+        except InvoiceParseError as exc:
+            failures.append({"filename": filename, "error": str(exc)})
+            continue
+        except Exception:
+            logging.exception("Failed to extract invoice fields from %s", filename)
+            failures.append(
+                {
+                    "filename": filename,
+                    "error": "Could not read this PDF as a supplier invoice.",
+                }
+            )
+            continue
+        entries.append({"filename": filename, "record": record})
+
+    if not entries:
+        message = "None of the PDFs could be read as invoices."
+        if fmt == "csv":
+            return Response(message + "\n", mimetype="text/plain", status=422)
+        return (
+            render_template(
+                "bulk.html",
+                error=message,
+                failures=failures,
+                summaries=None,
+            ),
+            422,
+        )
+    if fmt not in ("html", "csv"):
+        return _bulk_error("Format must be html or csv.", fmt, 400)
+
+    csv_text = to_batch_csv(entries)
+    if fmt == "csv":
+        return Response(
+            csv_text,
+            mimetype="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="invoices.csv"'},
+        )
+
+    summaries = [
+        {
+            "filename": entry["filename"],
+            "invoice_number": entry["record"]["invoice_number"],
+            "invoice_date": entry["record"]["invoice_date"],
+            "total_order": _display_money(entry["record"]["total_order"]),
+            "warnings": entry["record"]["warnings"],
+        }
+        for entry in entries
+    ]
+    return render_template(
+        "bulk.html",
+        error=None,
+        failures=failures,
+        summaries=summaries,
+        bulk_csv=csv_text,
+        row_count=len(entries) + 1,
     )

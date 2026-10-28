@@ -32,6 +32,7 @@
       {% set navigation_bar = [
           ('/files', 'files', 'Files'),
           ('/invoice', 'invoice', 'Invoice'),
+          ('/bulk', 'bulk', 'Bulk'),
           ('/rules', 'rules', 'Rules'),
           ('/jobs', 'jobs', 'Jobs')
       ] -%}
@@ -60,6 +61,7 @@
 
     {% block files %}{% endblock %}
     {% block invoice %}{% endblock %}
+    {% block bulk %}{% endblock %}
     {% block workspace %}{% endblock %}
     {% block rules %}{% endblock %}
     {% block jobs %}{% endblock %}

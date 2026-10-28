@@ -1,5 +1,6 @@
+import csv
 import json
-from io import BytesIO
+from io import BytesIO, StringIO
 from pathlib import Path
 
 import pytest
@@ -302,3 +303,89 @@ def test_web_rejects_a_blank_pdf(client):
     )
     assert response.status_code == 422
     assert b"Martin-Brower" in response.data
+
+
+def test_bulk_page_is_separate_from_the_single_invoice_form(client):
+    bulk = client.get("/bulk")
+    assert bulk.status_code == 200
+    assert b"Bulk invoices" in bulk.data
+    assert b'name="files"' in bulk.data
+    assert b"multiple" in bulk.data
+
+    single = client.get("/invoice")
+    assert b'name="files"' not in single.data
+    assert b"multiple" not in single.data
+    assert b"Upload two or more" not in single.data
+
+
+def test_bulk_requires_two_pdfs(client):
+    response = client.post(
+        "/bulk",
+        data={"files": (BytesIO(_blank_pdf()), "only.pdf")},
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 400
+    assert b"at least two" in response.data
+
+
+def test_bulk_csv_has_a_header_and_one_row_per_invoice(client):
+    if not SAMPLE_PDF.is_file() or not APPAREL_PDF.is_file():
+        pytest.skip("sample invoice PDFs are not in the repo")
+    uploads = [
+        (BytesIO(SAMPLE_PDF.read_bytes()), SAMPLE_PDF.name),
+        (BytesIO(APPAREL_PDF.read_bytes()), APPAREL_PDF.name),
+    ]
+    page = client.post(
+        "/bulk",
+        data={"files": uploads},
+        content_type="multipart/form-data",
+    )
+    assert page.status_code == 200
+    body = page.get_data(as_text=True)
+    assert "31308266" in body
+    assert "30039178" in body
+    assert "3 rows" in body
+    assert "Download CSV" in body
+
+    uploaded_again = [
+        (BytesIO(SAMPLE_PDF.read_bytes()), SAMPLE_PDF.name),
+        (BytesIO(APPAREL_PDF.read_bytes()), APPAREL_PDF.name),
+    ]
+    downloaded = client.post(
+        "/bulk?format=csv",
+        data={"files": uploaded_again},
+        content_type="multipart/form-data",
+    )
+    assert downloaded.status_code == 200
+    assert "text/csv" in downloaded.content_type
+    text = downloaded.get_data(as_text=True)
+    assert len(text.splitlines()) == 3
+    rows = list(csv.DictReader(StringIO(text)))
+    assert [row["Invoice Number"] for row in rows] == ["31308266", "30039178"]
+    assert rows[0]["Filename"] == SAMPLE_PDF.name
+    assert rows[0]["7428-001 GIVE AWAY PROMO"] == "905.41"
+    assert rows[0]["7440-001 APPAREL ACCESSORY"] == ""
+    assert rows[1]["7428-001 GIVE AWAY PROMO"] == ""
+    assert rows[1]["7440-001 APPAREL ACCESSORY"] == "224.60"
+    assert rows[1]["7001-001 FOOD"] == "15055.46"
+
+
+def test_bulk_keeps_successful_invoices_when_one_pdf_fails(client):
+    if not SAMPLE_PDF.is_file():
+        pytest.skip("sample invoice PDF is not in the repo")
+    response = client.post(
+        "/bulk",
+        data={
+            "files": [
+                (BytesIO(SAMPLE_PDF.read_bytes()), SAMPLE_PDF.name),
+                (BytesIO(_blank_pdf()), "blank.pdf"),
+            ]
+        },
+        content_type="multipart/form-data",
+    )
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "31308266" in body
+    assert "blank.pdf" in body
+    assert "left out of the CSV" in body
+    assert len(body.split("31308266")) >= 2

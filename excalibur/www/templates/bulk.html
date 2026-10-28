@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% set active_page = "bulk" %}
+{% block stylesheet %}
+{% endblock %}
+
+{% block bulk %}
+<div class="container">
+  <div class="row mb-4 border-bottom mb-5">
+    <div class="col-md-12 text-center">
+      <h1 class="display-4">Bulk invoices</h1>
+      <p class="lead">Upload two or more Martin-Brower PDFs and download one CSV</p>
+    </div>
+  </div>
+
+  <form class="mb-5" method="post" enctype="multipart/form-data" action="/bulk">
+    <div class="row align-items-center">
+      <div class="col-md-8 col-sm-8 col-xs-12">
+        <div class="input-group">
+          <div class="custom-file uploadFile">
+            <input type="file" class="uploadFile__input" id="bulk-files" name="files" accept="application/pdf" multiple required>
+            <label for="bulk-files" class="uploadFile__label">Upload PDFs</label>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-4 col-sm-4 col-xs-12 py-2">
+        <button type="submit" id="extract-bulk" class="btn btn-primary btn-block">Extract invoices</button>
+      </div>
+    </div>
+  </form>
+
+  {% if error %}
+    <div class="alert alert-danger" role="alert">{{ error }}</div>
+  {% endif %}
+
+  {% if failures %}
+    <div class="alert alert-warning" role="alert">
+      <div>These files were left out of the CSV.</div>
+      {% for failure in failures %}
+        <div>{{ failure.filename }}: {{ failure.error }}</div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  {% if summaries %}
+    <h5 class="card-title py-3 mb-0 text-dark font-weight-bold">{{ summaries|length }} invoices</h5>
+    <p class="text-muted">The CSV has a header row and one row per invoice ({{ row_count }} rows).</p>
+    <div class="card depth-1 mb-3">
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table text-left table-borderless mb-0">
+            <thead class="thead-light">
+              <tr>
+                <th scope="col">Filename</th>
+                <th scope="col">Invoice Number</th>
+                <th scope="col">Invoice Date</th>
+                <th scope="col" class="text-right">Total Order</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for summary in summaries %}
+                <tr>
+                  <td>{{ summary.filename }}</td>
+                  <td>{{ summary.invoice_number }}</td>
+                  <td>{{ summary.invoice_date }}</td>
+                  <td class="text-right font-weight-bold">{{ summary.total_order }}</td>
+                </tr>
+                {% if summary.warnings %}
+                  <tr>
+                    <td colspan="4" class="text-warning pt-0">{{ summary.warnings|join(" ") }}</td>
+                  </tr>
+                {% endif %}
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <p>
+      <button type="button" class="btn btn-primary" id="download-bulk-csv">Download CSV</button>
+    </p>
+    <pre id="bulk-csv" class="d-none">{{ bulk_csv }}</pre>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block javascript %}
+<script type="text/javascript" src="{{ url_for('static', filename='js/bulk.js') }}"></script>
+{% endblock %}
