@@ -175,11 +175,11 @@ def to_csv(record):
 
 
 def to_batch_csv(entries):
-    """One header and one QuickBooks bill line per G/L account.
+    """One header and one QuickBooks bill line per G/L account that has a net.
 
-    Standard accounts are always present. An account that appears on only
-    some of the invoices is still a row on every invoice, with the amount
-    and tax left blank where that invoice does not have it.
+    Standard accounts keep their order. Extra accounts follow them. An
+    account that is not on an invoice is left out of that invoice's rows,
+    because QuickBooks requires Line Amount on every line.
     """
     records = [entry["record"] for entry in entries]
     columns, descriptions = _batch_account_columns(records)
@@ -202,8 +202,7 @@ def _quickbooks_rows(record, columns=None, descriptions=None):
     """Repeat bill fields on every line, as the QuickBooks sample does.
 
     Line Amount is the Net column and Line Tax Amount is the Tax column.
-    A standard account missing from the invoice stays in the file with
-    those amounts blank.
+    Accounts with no net were not on the invoice, so they are left out.
     """
     if columns is None:
         columns = list(record["accounts"])
@@ -212,13 +211,11 @@ def _quickbooks_rows(record, columns=None, descriptions=None):
     rows = []
     for code in columns:
         account = record["accounts"].get(code) or {}
+        net = account.get("net")
+        if not net:
+            continue
         description = account.get("description") or (descriptions or {}).get(code, "")
         account_name, line_description, tax_code = _bdpq_fields(code, description)
-        net = account.get("net") or ""
-        if net:
-            tax_amount = account.get("tax") or "0.00"
-        else:
-            tax_amount = ""
         rows.append(
             [
                 supplier,
@@ -229,7 +226,7 @@ def _quickbooks_rows(record, columns=None, descriptions=None):
                 line_description,
                 net,
                 tax_code,
-                tax_amount,
+                account.get("tax") or "0.00",
                 record["invoice_number"],
             ]
         )

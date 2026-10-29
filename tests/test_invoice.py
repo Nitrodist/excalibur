@@ -217,12 +217,13 @@ def test_missing_standard_account_stays_in_the_output():
     assert record["accounts"]["7426-001"]["net"] is None
     assert record["accounts"]["7426-001"]["tax"] is None
     rows = list(csv.DictReader(StringIO(to_csv(record))))
-    assert len(rows) == 5
-    assert rows[3]["Account"] == "4080 Cost of Non-Product Sales"
-    assert rows[3]["Line Description"] == "Non-Product Purchase"
-    assert rows[3]["Line Amount"] == ""
-    assert rows[3]["Line Tax Amount"] == ""
-    assert rows[3]["Line Tax Code"] == "GST"
+    assert [row["Account"] for row in rows] == [
+        "5020 Food Purchases",
+        "5040 Paper Purchases",
+        "5440 Operating Supplies",
+        "5380 Promotion - Martin Brower",
+    ]
+    assert all(row["Line Amount"] for row in rows)
     assert record["warnings"]
     assert "was not found" not in record["warnings"][0]
 
@@ -293,15 +294,18 @@ def test_extra_gl_account_is_added_after_the_standard_rows():
         "tax": "26.94",
     }
     exported = list(csv.DictReader(StringIO(to_csv(record))))
-    assert len(exported) == 6
-    assert exported[4]["Account"] == "5380 Promotion - Martin Brower"
-    assert exported[4]["Line Amount"] == ""
-    assert exported[4]["Line Tax Code"] == "Out of Scope"
-    assert exported[5]["Account"] == "7440-001 APPAREL ACCESSORY"
-    assert exported[5]["Line Description"] == "APPAREL ACCESSORY"
-    assert exported[5]["Line Tax Code"] == "GST"
-    assert exported[5]["Line Amount"] == "224.60"
-    assert exported[5]["Line Tax Amount"] == "26.94"
+    assert [row["Account"] for row in exported] == [
+        "5020 Food Purchases",
+        "5040 Paper Purchases",
+        "5440 Operating Supplies",
+        "4080 Cost of Non-Product Sales",
+        "5430 Uniforms",
+    ]
+    uniforms = exported[-1]
+    assert uniforms["Line Description"] == "Uniform Purchase"
+    assert uniforms["Line Tax Code"] == "GST/PST MB"
+    assert uniforms["Line Amount"] == "224.60"
+    assert uniforms["Line Tax Amount"] == "26.94"
 
 
 def test_cli_prints_json_for_the_supplier_invoice():
@@ -465,7 +469,7 @@ def test_bulk_csv_has_a_header_and_one_row_per_invoice(client):
     body = page.get_data(as_text=True)
     assert "31308266" in body
     assert "30039178" in body
-    assert "12 line items" in body
+    assert "10 line items" in body
     assert "Download CSV" in body
     assert "Supplier,Bill Date,Due Date,Terms,Account" in body
 
@@ -482,11 +486,11 @@ def test_bulk_csv_has_a_header_and_one_row_per_invoice(client):
     assert "text/csv" in downloaded.content_type
     text = downloaded.get_data(as_text=True)
     rows = list(csv.DictReader(StringIO(text)))
-    assert len(rows) == 12
+    assert len(rows) == 10
     first = [row for row in rows if row["Bill No"] == "31308266"]
     second = [row for row in rows if row["Bill No"] == "30039178"]
-    assert len(first) == 6
-    assert len(second) == 6
+    assert len(first) == 5
+    assert len(second) == 5
     assert first[0]["Supplier"] == "MARTIN-BROWER OF CANADA CO"
     assert first[0]["Bill Date"] == "10/07/2026"
     assert first[0]["Due Date"] == "10/14/2026"
@@ -497,7 +501,6 @@ def test_bulk_csv_has_a_header_and_one_row_per_invoice(client):
         "5440 Operating Supplies",
         "4080 Cost of Non-Product Sales",
         "5380 Promotion - Martin Brower",
-        "7440-001 APPAREL ACCESSORY",
     ]
     assert [row["Line Tax Code"] for row in first] == [
         "GST",
@@ -505,7 +508,6 @@ def test_bulk_csv_has_a_header_and_one_row_per_invoice(client):
         "GST/PST MB",
         "GST",
         "Out of Scope",
-        "GST",
     ]
     assert [row["Line Amount"] for row in first] == [
         "25921.00",
@@ -513,7 +515,6 @@ def test_bulk_csv_has_a_header_and_one_row_per_invoice(client):
         "259.70",
         "971.93",
         "905.41",
-        "",
     ]
     assert [row["Line Tax Amount"] for row in first] == [
         "29.19",
@@ -521,15 +522,20 @@ def test_bulk_csv_has_a_header_and_one_row_per_invoice(client):
         "31.16",
         "48.60",
         "0.00",
-        "",
     ]
     assert first[4]["Line Description"] == "Monopoly Cost"
+    assert [row["Account"] for row in second] == [
+        "5020 Food Purchases",
+        "5040 Paper Purchases",
+        "5440 Operating Supplies",
+        "4080 Cost of Non-Product Sales",
+        "5430 Uniforms",
+    ]
     assert [row["Line Amount"] for row in second] == [
         "15055.46",
         "2493.26",
         "636.55",
         "318.38",
-        "",
         "224.60",
     ]
     assert [row["Line Tax Amount"] for row in second] == [
@@ -537,12 +543,12 @@ def test_bulk_csv_has_a_header_and_one_row_per_invoice(client):
         "124.68",
         "63.11",
         "15.91",
-        "",
         "26.94",
     ]
     assert second[2]["Line Description"] == "Ops Supplies Purchase"
     assert second[2]["Line Tax Code"] == "GST/PST MB"
-    assert second[-1]["Line Description"] == "APPAREL ACCESSORY"
+    assert second[-1]["Line Description"] == "Uniform Purchase"
+    assert second[-1]["Line Tax Code"] == "GST/PST MB"
     assert "Filename" not in rows[0]
 
 
