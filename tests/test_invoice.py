@@ -28,6 +28,9 @@ KEN_NO_PST_PDF = (
 KEN_REFUND_PDF = (
     Path(__file__).resolve().parents[1] / "KEN MB 31368179 Oct-16-2026.pdf"
 )
+KEN_NEGATIVE_TAX_PDF = (
+    Path(__file__).resolve().parents[1] / "KEN MB 31278204 Oct-02-2026.pdf"
+)
 
 REFUND_TEXT = """
 Invoice #:        31368179 RI
@@ -367,6 +370,23 @@ def test_refund_pdf_exports_a_negative_food_line():
 
 
 @pytest.mark.skipif(
+    not KEN_NEGATIVE_TAX_PDF.is_file(),
+    reason="KEN invoice PDF is not in the repo",
+)
+def test_negative_line_tax_is_written_as_zero():
+    record = parse_invoice_bytes(KEN_NEGATIVE_TAX_PDF.read_bytes())
+    assert record["invoice_number"] == "31278204"
+    assert Decimal(record["accounts"]["7420-001"]["tax"]) < 0
+    assert record["accounts"]["7420-001"]["net"] == "-375.36"
+    rows = list(csv.DictReader(StringIO(to_csv(record))))
+    ops = [row for row in rows if row["Account"] == "5440 Operating Supplies"]
+    assert ops[0]["Line Amount"] == "-375.36"
+    assert ops[0]["Line Tax Amount"] == "0.00"
+    assert Decimal(ops[0]["Line Tax Amount"]) >= 0
+    assert all(Decimal(row["Line Tax Amount"]) >= 0 for row in rows)
+
+
+@pytest.mark.skipif(
     not APPAREL_PDF.is_file(), reason="apparel invoice PDF is not in the repo"
 )
 def test_extra_gl_account_is_added_after_the_standard_rows():
@@ -681,3 +701,37 @@ def test_bulk_keeps_successful_invoices_when_one_pdf_fails(client):
     assert "blank.pdf" in body
     assert "left out of the CSV" in body
     assert len(body.split("31308266")) >= 2
+
+
+def test_bulk_leaves_a_negative_bill_out_of_the_csv(client):
+    if not SAMPLE_PDF.is_file() or not KEN_REFUND_PDF.is_file():
+        pytest.skip("sample invoice PDFs are not in the repo")
+    uploads = [
+        (BytesIO(SAMPLE_PDF.read_bytes()), SAMPLE_PDF.name),
+        (BytesIO(KEN_REFUND_PDF.read_bytes()), KEN_REFUND_PDF.name),
+    ]
+    page = client.post(
+        "/bulk",
+        data={"files": uploads},
+        content_type="multipart/form-data",
+    )
+    body = page.get_data(as_text=True)
+    assert page.status_code == 200
+    assert "left out of the CSV" in body
+    assert KEN_REFUND_PDF.name in body
+    assert "Bill total is negative" in body
+    assert "31308266" in body
+    downloaded = client.post(
+        "/bulk?format=csv",
+        data={
+            "files": [
+                (BytesIO(SAMPLE_PDF.read_bytes()), SAMPLE_PDF.name),
+                (BytesIO(KEN_REFUND_PDF.read_bytes()), KEN_REFUND_PDF.name),
+            ]
+        },
+        content_type="multipart/form-data",
+    )
+    text = downloaded.get_data(as_text=True)
+    assert downloaded.status_code == 200
+    assert "31308266" in text
+    assert "31368179" not in text

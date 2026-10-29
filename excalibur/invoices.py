@@ -226,11 +226,26 @@ def _quickbooks_rows(record, columns=None, descriptions=None):
                 line_description,
                 net,
                 tax_code,
-                account.get("tax") or "0.00",
+                _qbo_line_tax_amount(account.get("tax")),
                 record["invoice_number"],
             ]
         )
     return rows
+
+
+def qbo_import_error(record):
+    """QuickBooks Online rejects a bill whose total is negative."""
+    if Decimal(record["total_order"]) < 0:
+        return "Bill total is negative; QuickBooks Online cannot import it."
+    return None
+
+
+def _qbo_line_tax_amount(raw):
+    """QuickBooks requires a Line Tax Amount of zero or more."""
+    tax = Decimal(raw or "0")
+    if tax < 0:
+        return format_money(Decimal("0.00"))
+    return format_money(tax)
 
 
 def _bdpq_fields(code, description):
@@ -284,12 +299,13 @@ def invoice_verification(record):
     gst = Decimal("0.00")
     gst_pst = Decimal("0.00")
     line_items = Decimal("0.00")
-    for values in _quickbooks_rows(record):
-        row = dict(zip(QBO_COLUMNS, values))
-        amount = Decimal(row["Line Amount"])
-        tax_amount = Decimal(row["Line Tax Amount"] or "0")
-        tax_code = row["Line Tax Code"]
-        line_items += amount + tax_amount
+    for code, account in record["accounts"].items():
+        net = account.get("net")
+        if net in (None, ""):
+            continue
+        tax_amount = Decimal(account.get("tax") or "0")
+        _, _, tax_code = _bdpq_fields(code, account.get("description") or "")
+        line_items += Decimal(net) + tax_amount
         if tax_code == "GST/PST MB":
             gst_pst += tax_amount
         elif tax_code == "GST":

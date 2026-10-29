@@ -26,6 +26,7 @@ from ..invoices import (
     display_rows,
     display_verification,
     parse_invoice_bytes,
+    qbo_import_error,
     to_batch_csv,
     to_csv,
 )
@@ -420,6 +421,10 @@ def bulk():
                     "error": "Could not read this PDF as a supplier invoice.",
                 }
             )
+            continue
+        skip = qbo_import_error(record)
+        if skip:
+            failures.append({"filename": filename, "error": skip})
             continue
         entries.append({"filename": filename, "record": record})
 
