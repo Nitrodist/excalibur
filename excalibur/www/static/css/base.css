@@ -98,7 +98,8 @@ input:active, .form-control:active {
   overflow: hidden;
 }
 
-.uploadFile .uploadFile__input:hover ~ .uploadFile__label  {
+.uploadFile .uploadFile__input:hover ~ .uploadFile__label,
+.uploadFile.is-dragover .uploadFile__label {
   border-style: solid;
   box-shadow: inset 0px 0px 0px 0.05em #2196F3;
 }

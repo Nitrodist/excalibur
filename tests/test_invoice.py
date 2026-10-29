@@ -444,6 +444,7 @@ def test_bulk_page_is_separate_from_the_single_invoice_form(client):
     assert b"Bulk invoices" in bulk.data
     assert b'name="files"' in bulk.data
     assert b"multiple" in bulk.data
+    assert b"Upload or drop PDFs" in bulk.data
 
     single = client.get("/invoice")
     assert b'name="files"' not in single.data
