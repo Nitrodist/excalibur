@@ -54,6 +54,7 @@
                 <th scope="col">Invoice Number</th>
                 <th scope="col">Invoice Date</th>
                 <th scope="col" class="text-right">Total Order</th>
+                <th scope="col" class="text-right">Verification</th>
               </tr>
             </thead>
             <tbody>
@@ -63,10 +64,15 @@
                   <td>{{ summary.invoice_number }}</td>
                   <td>{{ summary.invoice_date }}</td>
                   <td class="text-right font-weight-bold">{{ summary.total_order }}</td>
+                  <td class="text-right{% if not summary.verification.ok %} text-danger{% endif %}">
+                    <div>GST {{ summary.verification.gst }}</div>
+                    <div>GST/PST {{ summary.verification.gst_pst }}</div>
+                    <div>Total − lines {{ summary.verification.difference }}</div>
+                  </td>
                 </tr>
                 {% if summary.warnings %}
                   <tr>
-                    <td colspan="4" class="text-warning pt-0">{{ summary.warnings|join(" ") }}</td>
+                    <td colspan="5" class="text-warning pt-0">{{ summary.warnings|join(" ") }}</td>
                   </tr>
                 {% endif %}
               {% endfor %}

@@ -2,8 +2,8 @@
 
 The G/L figures are the Net column and the Tax column on that same row. On
 these invoices the net amounts plus PST and GST equal Total Order. CSV
-downloads are a QuickBooks Online bill import: one row per G/L account,
-including the standard accounts and any extra account in the batch.
+downloads are a QuickBooks Online bill import: one row per G/L line that
+is actually on the invoice.
 """
 
 import os
@@ -175,11 +175,10 @@ def to_csv(record):
 
 
 def to_batch_csv(entries):
-    """One header and one QuickBooks bill line per G/L account that has a net.
+    """One header and one QuickBooks bill line per G/L account on each invoice.
 
-    Standard accounts keep their order. Extra accounts follow them. An
-    account that is not on an invoice is left out of that invoice's rows,
-    because QuickBooks requires Line Amount on every line.
+    Known accounts keep their order. Extra accounts follow them. An account
+    that is not on an invoice is left out.
     """
     records = [entry["record"] for entry in entries]
     columns, descriptions = _batch_account_columns(records)
@@ -202,7 +201,7 @@ def _quickbooks_rows(record, columns=None, descriptions=None):
     """Repeat bill fields on every line, as the QuickBooks sample does.
 
     Line Amount is the Net column and Line Tax Amount is the Tax column.
-    Accounts with no net were not on the invoice, so they are left out.
+    Only accounts that appear on the invoice are written.
     """
     if columns is None:
         columns = list(record["accounts"])
@@ -286,6 +285,47 @@ def display_rows(record):
     return rows
 
 
+def invoice_verification(record):
+    """Compare the tax-inclusive total owing to the exported bill lines.
+
+    GST and GST/PST are the Line Tax Amounts grouped by the mapped tax code.
+    The remainder is Total Order minus those line amounts and line taxes.
+    """
+    gst = Decimal("0.00")
+    gst_pst = Decimal("0.00")
+    line_items = Decimal("0.00")
+    for row in _quickbooks_rows(record):
+        amount = Decimal(row[6])
+        tax_amount = Decimal(row[8] or "0")
+        tax_code = row[7]
+        line_items += amount + tax_amount
+        if tax_code == "GST/PST MB":
+            gst_pst += tax_amount
+        elif tax_code == "GST":
+            gst += tax_amount
+    total = Decimal(record["total_order"])
+    difference = (total - line_items).quantize(Decimal("0.01"))
+    return {
+        "gst": gst.quantize(Decimal("0.01")),
+        "gst_pst": gst_pst.quantize(Decimal("0.01")),
+        "line_items": line_items.quantize(Decimal("0.01")),
+        "total": total,
+        "difference": difference,
+        "ok": difference == Decimal("0.00"),
+    }
+
+
+def display_verification(record):
+    """Formatted GST, GST/PST, and remainder for the bulk results table."""
+    check = invoice_verification(record)
+    return {
+        "gst": _display_money(check["gst"]),
+        "gst_pst": _display_money(check["gst_pst"]),
+        "difference": _display_money(check["difference"]),
+        "ok": check["ok"],
+    }
+
+
 def layout_text(path):
     """Rebuild reading order from glyph positions.
 
@@ -348,26 +388,24 @@ def _accounts(section):
         found[match.group("code")] = (description, net, tax)
 
     accounts = {}
-    warnings = []
-    # Standard accounts stay in the output even when this invoice omits them.
-    for code, canonical in KNOWN_ACCOUNTS:
-        if code in found:
-            description, net, tax = found.pop(code)
-            accounts[code] = {
-                "description": description,
-                "net": format_money(net),
-                "tax": format_money(tax),
-            }
-        else:
-            accounts[code] = {"description": canonical, "net": None, "tax": None}
-    for code in sorted(found):
-        description, net, tax = found[code]
+    remaining = dict(found)
+    for code, _canonical in KNOWN_ACCOUNTS:
+        if code not in remaining:
+            continue
+        description, net, tax = remaining.pop(code)
         accounts[code] = {
             "description": description,
             "net": format_money(net),
             "tax": format_money(tax),
         }
-    return accounts, warnings
+    for code in sorted(remaining):
+        description, net, tax = remaining[code]
+        accounts[code] = {
+            "description": description,
+            "net": format_money(net),
+            "tax": format_money(tax),
+        }
+    return accounts, []
 
 
 def _net_and_tax(raw):

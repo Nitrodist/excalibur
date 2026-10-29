@@ -1,5 +1,6 @@
 import csv
 import json
+from decimal import Decimal
 from io import BytesIO, StringIO
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from reportlab.pdfgen import canvas
 from excalibur.cli import cli
 from excalibur.invoices import (
     InvoiceParseError,
+    invoice_verification,
     parse_invoice_bytes,
     parse_invoice_text,
     to_csv,
@@ -129,6 +131,23 @@ def test_example_text_uses_the_net_column():
     _assert_example(parse_invoice_text(EXAMPLE_TEXT))
 
 
+def test_invoice_verification_uses_exported_line_taxes():
+    if not SAMPLE_PDF.is_file() or not APPAREL_PDF.is_file():
+        pytest.skip("sample invoice PDFs are not in the repo")
+    sample = invoice_verification(parse_invoice_bytes(SAMPLE_PDF.read_bytes()))
+    assert sample["gst"] == Decimal("305.53")
+    assert sample["gst_pst"] == Decimal("31.16")
+    assert sample["total"] == Decimal("32044.02")
+    assert sample["difference"] == Decimal("0.00")
+    assert sample["ok"] is True
+    apparel = invoice_verification(parse_invoice_bytes(APPAREL_PDF.read_bytes()))
+    assert apparel["gst"] == Decimal("140.70")
+    assert apparel["gst_pst"] == Decimal("90.05")
+    assert apparel["total"] == Decimal("18959.00")
+    assert apparel["difference"] == Decimal("0.00")
+    assert apparel["ok"] is True
+
+
 def test_supplier_comes_from_remit_to():
     text = "CoOp Manitoba Remit To: EXAMPLE SUPPLIER LTD\n" + EXAMPLE_TEXT
     record = parse_invoice_text(text)
@@ -201,21 +220,19 @@ def test_example_pdf_round_trip():
     _assert_example(parse_invoice_bytes(_example_pdf()))
 
 
-def test_missing_standard_account_stays_in_the_output():
+def test_missing_standard_account_is_omitted():
     text = EXAMPLE_TEXT.replace(
         "7426-001  TOY PROMOTION                      2        87.51       0.20        87.71\n",
         "",
     )
     record = parse_invoice_text(text)
-    assert list(record["accounts"])[:5] == [code for code, _description in (
-        ("7001-001", "FOOD"),
-        ("7030-001", "PAPER"),
-        ("7420-001", "OPERATING SUPPLIES"),
-        ("7426-001", "TOY PROMOTION"),
-        ("7428-001", "GIVE AWAY PROMO"),
-    )]
-    assert record["accounts"]["7426-001"]["net"] is None
-    assert record["accounts"]["7426-001"]["tax"] is None
+    assert "7426-001" not in record["accounts"]
+    assert list(record["accounts"]) == [
+        "7001-001",
+        "7030-001",
+        "7420-001",
+        "7428-001",
+    ]
     rows = list(csv.DictReader(StringIO(to_csv(record))))
     assert [row["Account"] for row in rows] == [
         "5020 Food Purchases",
@@ -272,9 +289,9 @@ def test_extra_gl_account_is_added_after_the_standard_rows():
         "7030-001",
         "7420-001",
         "7426-001",
-        "7428-001",
         "7440-001",
     ]
+    assert "7428-001" not in record["accounts"]
     assert record["accounts"]["7001-001"]["net"] == "15055.46"
     assert record["accounts"]["7001-001"]["tax"] == "0.11"
     assert record["accounts"]["7030-001"]["net"] == "2493.26"
@@ -283,11 +300,6 @@ def test_extra_gl_account_is_added_after_the_standard_rows():
     assert record["accounts"]["7420-001"]["tax"] == "63.11"
     assert record["accounts"]["7426-001"]["net"] == "318.38"
     assert record["accounts"]["7426-001"]["tax"] == "15.91"
-    assert record["accounts"]["7428-001"] == {
-        "description": "GIVE AWAY PROMO",
-        "net": None,
-        "tax": None,
-    }
     assert record["accounts"]["7440-001"] == {
         "description": "APPAREL ACCESSORY",
         "net": "224.60",
@@ -379,12 +391,8 @@ def test_web_page_lists_standard_accounts_and_extra_ones(client):
     assert "7030-001 PAPER" in body
     assert "7420-001 OPERATING SUPPLIES" in body
     assert "7426-001 TOY PROMOTION" in body
-    assert "7428-001 GIVE AWAY PROMO" in body
+    assert "7428-001 GIVE AWAY PROMO" not in body
     assert "7440-001 APPAREL ACCESSORY" in body
-    giveaway = body.index("7428-001 GIVE AWAY PROMO")
-    apparel = body.index("7440-001 APPAREL ACCESSORY")
-    assert giveaway < apparel
-    assert "—" in body
     assert "224.60 (tax 26.94)" in body
     assert "15,055.46 (tax 0.11)" in body
     assert "was not found" not in body
@@ -472,6 +480,12 @@ def test_bulk_csv_has_a_header_and_one_row_per_invoice(client):
     assert "10 line items" in body
     assert "Download CSV" in body
     assert "Supplier,Bill Date,Due Date,Terms,Account" in body
+    assert "Verification" in body
+    assert "GST 305.53" in body
+    assert "GST/PST 31.16" in body
+    assert "GST 140.70" in body
+    assert "GST/PST 90.05" in body
+    assert "Total − lines 0.00" in body
 
     uploaded_again = [
         (BytesIO(SAMPLE_PDF.read_bytes()), SAMPLE_PDF.name),

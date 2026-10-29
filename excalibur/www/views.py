@@ -24,6 +24,7 @@ from ..invoices import (
     InvoiceParseError,
     _display_money,
     display_rows,
+    display_verification,
     parse_invoice_bytes,
     to_batch_csv,
     to_csv,
@@ -453,6 +454,7 @@ def bulk():
             "invoice_number": entry["record"]["invoice_number"],
             "invoice_date": entry["record"]["invoice_date"],
             "total_order": _display_money(entry["record"]["total_order"]),
+            "verification": display_verification(entry["record"]),
             "warnings": entry["record"]["warnings"],
         }
         for entry in entries

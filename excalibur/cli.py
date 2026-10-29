@@ -110,7 +110,7 @@ def invoice(pdf, fmt, output):
 
     Account amounts are the Net column on the G/L summary. Each line's tax
     is the Tax column on that row. CSV is a QuickBooks Online bill import,
-    one row per G/L account.
+    one row per G/L account that is on the invoice.
     """
     try:
         record = parse_invoice(pdf)
