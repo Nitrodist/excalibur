@@ -67,7 +67,6 @@ QBO_COLUMNS = (
     "Supplier",
     "Bill Date",
     "Due Date",
-    "Terms",
     "Account",
     "Line Description",
     "Line Amount",
@@ -214,7 +213,6 @@ def _quickbooks_rows(record, columns=None, descriptions=None):
     if columns is None:
         columns = list(record["accounts"])
     supplier = record.get("supplier") or DEFAULT_SUPPLIER
-    terms = _payment_terms(record["invoice_date"], record["amount_due_date"])
     rows = []
     for code in columns:
         account = record["accounts"].get(code) or {}
@@ -228,7 +226,6 @@ def _quickbooks_rows(record, columns=None, descriptions=None):
                 supplier,
                 record["invoice_date"],
                 record["amount_due_date"],
-                terms,
                 account_name,
                 line_description,
                 net,
@@ -269,17 +266,6 @@ def _batch_account_columns(records):
     return columns, descriptions
 
 
-def _payment_terms(invoice_date, due_date):
-    bill = datetime.strptime(invoice_date, "%m/%d/%Y")
-    due = datetime.strptime(due_date, "%m/%d/%Y")
-    days = (due - bill).days
-    if days < 0:
-        return ""
-    if days == 0:
-        return "Due on receipt"
-    return f"Net {days}"
-
-
 def display_rows(record):
     """Label/value pairs for the web page, with money grouped in thousands."""
     rows = [
@@ -302,10 +288,11 @@ def invoice_verification(record):
     gst = Decimal("0.00")
     gst_pst = Decimal("0.00")
     line_items = Decimal("0.00")
-    for row in _quickbooks_rows(record):
-        amount = Decimal(row[6])
-        tax_amount = Decimal(row[8] or "0")
-        tax_code = row[7]
+    for values in _quickbooks_rows(record):
+        row = dict(zip(QBO_COLUMNS, values))
+        amount = Decimal(row["Line Amount"])
+        tax_amount = Decimal(row["Line Tax Amount"] or "0")
+        tax_code = row["Line Tax Code"]
         line_items += amount + tax_amount
         if tax_code == "GST/PST MB":
             gst_pst += tax_amount

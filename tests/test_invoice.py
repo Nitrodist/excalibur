@@ -161,7 +161,6 @@ def test_csv_is_a_quickbooks_bill_import():
         "Supplier",
         "Bill Date",
         "Due Date",
-        "Terms",
         "Account",
         "Line Description",
         "Line Amount",
@@ -174,7 +173,7 @@ def test_csv_is_a_quickbooks_bill_import():
     assert food["Supplier"] == "Martin Brower of Canada Co"
     assert food["Bill Date"] == "10/05/2026"
     assert food["Due Date"] == "10/12/2026"
-    assert food["Terms"] == "Net 7"
+    assert "Terms" not in food
     assert food["Bill No"] == "31278945"
     assert [
         (
@@ -344,7 +343,7 @@ def test_cli_writes_csv(tmp_path):
     )
     assert result.exit_code == 0, result.output
     text = destination.read_text(encoding="utf-8")
-    assert text.splitlines()[0].startswith("Supplier,Bill Date,Due Date,Terms,")
+    assert text.splitlines()[0].startswith("Supplier,Bill Date,Due Date,Account,")
     assert "31308266" in text
     assert "10/07/2026" in text
     assert "Martin Brower of Canada Co" in text
@@ -484,7 +483,7 @@ def test_bulk_csv_has_a_header_and_one_row_per_invoice(client):
     assert "30039178" in body
     assert "10 line items" in body
     assert "Download CSV" in body
-    assert "Supplier,Bill Date,Due Date,Terms,Account" in body
+    assert "Supplier,Bill Date,Due Date,Account" in body
     assert "Verification" in body
     assert "GST 305.53" in body
     assert "GST/PST 31.16" in body
@@ -513,7 +512,7 @@ def test_bulk_csv_has_a_header_and_one_row_per_invoice(client):
     assert first[0]["Supplier"] == "Martin Brower of Canada Co"
     assert first[0]["Bill Date"] == "10/07/2026"
     assert first[0]["Due Date"] == "10/14/2026"
-    assert first[0]["Terms"] == "Net 7"
+    assert "Terms" not in first[0]
     assert [row["Account"] for row in first] == [
         "5020 Food Purchases",
         "5040 Paper Purchases",
