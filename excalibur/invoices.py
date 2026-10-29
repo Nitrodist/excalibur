@@ -87,7 +87,7 @@ _AMOUNT_DUE = re.compile(rf"Amount Due\s+(\d{{1,2}}/\d{{1,2}}/\d{{4}})\s+({_MONE
 _GL_LINE = re.compile(
     rf"^(?P<code>\d{{4}}-\d{{3}})\s+"
     rf"(?P<description>[A-Za-z0-9][A-Za-z0-9 &'/-]*?)\s+"
-    rf"(?:(?P<qty>\d+)\s+)?"
+    rf"(?:(?P<qty>\d+-?)\s+)?"
     rf"(?P<amounts>{_GL_MONEY}(?:\s+{_GL_MONEY})*)",
     re.MULTILINE,
 )
@@ -134,10 +134,6 @@ def parse_invoice_text(text):
         missing.append("Invoice #")
     if not invoice_date_match:
         missing.append("Invoice Date")
-    if not gst_match:
-        missing.append("GST / HST / TPS")
-    if not pst_match:
-        missing.append("PST")
     if not due_match:
         missing.append("Amount Due date and Total Order")
     if missing:
@@ -157,8 +153,8 @@ def parse_invoice_text(text):
         "invoice_number": invoice_match.group(1),
         "supplier": supplier,
         "invoice_date": _normalize_date(invoice_date_match.group(1)),
-        "pst": format_money(parse_money(pst_match.group(1))),
-        "gst_hst_tps": format_money(parse_money(gst_match.group(1))),
+        "pst": _optional_tax_total(pst_match),
+        "gst_hst_tps": _optional_tax_total(gst_match),
         "amount_due_date": _normalize_date(due_match.group(1)),
         "accounts": accounts,
         "total_order": format_money(parse_money(due_match.group(2))),
@@ -217,7 +213,7 @@ def _quickbooks_rows(record, columns=None, descriptions=None):
     for code in columns:
         account = record["accounts"].get(code) or {}
         net = account.get("net")
-        if not net:
+        if net in (None, ""):
             continue
         description = account.get("description") or (descriptions or {}).get(code, "")
         account_name, line_description, tax_code = _bdpq_fields(code, description)
@@ -345,6 +341,13 @@ def parse_money(raw):
     if negative:
         value = -value
     return value.quantize(Decimal("0.01"))
+
+
+def _optional_tax_total(match):
+    """GST and PST totals are omitted when no line incurred that tax."""
+    if not match:
+        return format_money(Decimal("0.00"))
+    return format_money(parse_money(match.group(1)))
 
 
 def _normalize_date(raw):

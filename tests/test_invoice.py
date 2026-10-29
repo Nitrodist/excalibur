@@ -22,6 +22,20 @@ from excalibur import configuration as conf
 
 SAMPLE_PDF = Path(__file__).resolve().parents[1] / "PS MB 31308266 Oct-07-2026.pdf"
 APPAREL_PDF = Path(__file__).resolve().parents[1] / "GP MB 30039178 Feb-11-2026.pdf"
+KEN_NO_PST_PDF = (
+    Path(__file__).resolve().parents[1] / "KEN MB 31316217 Oct-09-2026.pdf"
+)
+KEN_REFUND_PDF = (
+    Path(__file__).resolve().parents[1] / "KEN MB 31368179 Oct-16-2026.pdf"
+)
+
+REFUND_TEXT = """
+Invoice #:        31368179 RI
+Invoice Date:     10/16/2026
+1- Amount Due 10/16/2026 96.00-
+G/L Acct  Description             QTY Shipped          Net        Tax        Total
+7001-001  FOOD                              1-       96.00-                 96.00-
+"""
 
 # Figures from a different invoice, used to lock which column is read.
 # The Net column plus PST and GST equals Total Order. The last money
@@ -249,6 +263,48 @@ def test_unrecognized_pdf_explains_what_is_missing():
         parse_invoice_bytes(_blank_pdf())
 
 
+def test_missing_gst_and_pst_totals_are_zero():
+    text = EXAMPLE_TEXT.replace(
+        "GST / HST / TPS                5.000%    175.07\n"
+        "PST - MB                       7.000%      6.00\n",
+        "",
+    )
+    record = parse_invoice_text(text)
+    assert record["gst_hst_tps"] == "0.00"
+    assert record["pst"] == "0.00"
+    assert record["invoice_number"] == "31278945"
+
+
+def test_missing_pst_alone_is_zero():
+    text = EXAMPLE_TEXT.replace(
+        "PST - MB                       7.000%      6.00\n",
+        "",
+    )
+    record = parse_invoice_text(text)
+    assert record["pst"] == "0.00"
+    assert record["gst_hst_tps"] == "175.07"
+
+
+def test_refund_invoice_keeps_negative_amounts():
+    record = parse_invoice_text(REFUND_TEXT)
+    assert record["invoice_number"] == "31368179"
+    assert record["gst_hst_tps"] == "0.00"
+    assert record["pst"] == "0.00"
+    assert record["total_order"] == "-96.00"
+    assert record["accounts"]["7001-001"] == {
+        "description": "FOOD",
+        "net": "-96.00",
+        "tax": "0.00",
+    }
+    assert record["warnings"] == []
+    rows = list(csv.DictReader(StringIO(to_csv(record))))
+    assert len(rows) == 1
+    assert rows[0]["Line Amount"] == "-96.00"
+    assert rows[0]["Line Tax Amount"] == "0.00"
+    assert rows[0]["Line Tax Code"] == "GST"
+    assert rows[0]["Bill No"] == "31368179"
+
+
 @pytest.mark.skipif(
     not SAMPLE_PDF.is_file(), reason="sample invoice PDF is not in the repo"
 )
@@ -272,6 +328,42 @@ def test_supplier_invoice_pdf():
     assert record["accounts"]["7426-001"]["tax"] == "48.60"
     assert record["accounts"]["7428-001"]["net"] == "905.41"
     assert record["accounts"]["7428-001"]["tax"] == "0.00"
+
+
+@pytest.mark.skipif(
+    not KEN_NO_PST_PDF.is_file(), reason="KEN invoice PDF is not in the repo"
+)
+def test_invoice_without_pst_total_is_still_parsed():
+    record = parse_invoice_bytes(KEN_NO_PST_PDF.read_bytes())
+    assert record["invoice_number"] == "31316217"
+    assert record["pst"] == "0.00"
+    assert record["gst_hst_tps"] == "186.78"
+    assert record["total_order"] == "27630.97"
+    assert record["warnings"] == []
+    assert record["accounts"]["7001-001"]["net"] == "24201.09"
+    rows = list(csv.DictReader(StringIO(to_csv(record))))
+    assert rows
+    assert all(row["Line Amount"] for row in rows)
+
+
+@pytest.mark.skipif(
+    not KEN_REFUND_PDF.is_file(), reason="KEN refund PDF is not in the repo"
+)
+def test_refund_pdf_exports_a_negative_food_line():
+    record = parse_invoice_bytes(KEN_REFUND_PDF.read_bytes())
+    assert record["invoice_number"] == "31368179"
+    assert record["gst_hst_tps"] == "0.00"
+    assert record["pst"] == "0.00"
+    assert record["total_order"] == "-96.00"
+    assert record["accounts"]["7001-001"] == {
+        "description": "FOOD",
+        "net": "-96.00",
+        "tax": "0.00",
+    }
+    assert record["warnings"] == []
+    rows = list(csv.DictReader(StringIO(to_csv(record))))
+    assert [row["Line Amount"] for row in rows] == ["-96.00"]
+    assert rows[0]["Line Tax Amount"] == "0.00"
 
 
 @pytest.mark.skipif(
