@@ -26,7 +26,12 @@ KNOWN_ACCOUNTS = (
 
 # Printed after "Remit To:" on this supplier's invoices. Example PDFs that
 # omit the line still export under this name.
-DEFAULT_SUPPLIER = "MARTIN-BROWER OF CANADA CO"
+DEFAULT_SUPPLIER = "Martin Brower of Canada Co"
+
+# Martin Brower G/L code -> BDPQ Automation account.
+SUPPLIER_TO_BDPQ = {
+    "MARTIN-BROWER OF CANADA CO": "Martin Brower of Canada Co",
+}
 # Martin Brower G/L code -> BDPQ Automation account.
 MB_TO_BDPQ = {
     "7001-001": "5020 Food Purchases",
@@ -146,6 +151,9 @@ def parse_invoice_text(text):
     supplier = DEFAULT_SUPPLIER
     if supplier_match:
         supplier = supplier_match.group(1).strip() or DEFAULT_SUPPLIER
+        if SUPPLIER_TO_BDPQ.get(supplier):
+            supplier = SUPPLIER_TO_BDPQ.get(supplier)
+
     record = {
         "invoice_number": invoice_match.group(1),
         "supplier": supplier,

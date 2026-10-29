@@ -102,7 +102,7 @@ def _example_pdf():
 
 def _assert_example(record):
     assert record["invoice_number"] == "31278945"
-    assert record["supplier"] == "MARTIN-BROWER OF CANADA CO"
+    assert record["supplier"] == "Martin Brower of Canada Co"
     assert record["invoice_date"] == "10/05/2026"
     assert record["pst"] == "6.00"
     assert record["gst_hst_tps"] == "175.07"
@@ -171,7 +171,7 @@ def test_csv_is_a_quickbooks_bill_import():
     ]
     assert len(rows) == 5
     food = rows[0]
-    assert food["Supplier"] == "MARTIN-BROWER OF CANADA CO"
+    assert food["Supplier"] == "Martin Brower of Canada Co"
     assert food["Bill Date"] == "10/05/2026"
     assert food["Due Date"] == "10/12/2026"
     assert food["Terms"] == "Net 7"
@@ -250,11 +250,13 @@ def test_unrecognized_pdf_explains_what_is_missing():
         parse_invoice_bytes(_blank_pdf())
 
 
-@pytest.mark.skipif(not SAMPLE_PDF.is_file(), reason="sample invoice PDF is not in the repo")
+@pytest.mark.skipif(
+    not SAMPLE_PDF.is_file(), reason="sample invoice PDF is not in the repo"
+)
 def test_supplier_invoice_pdf():
     record = parse_invoice_bytes(SAMPLE_PDF.read_bytes())
     assert record["invoice_number"] == "31308266"
-    assert record["supplier"] == "MARTIN-BROWER OF CANADA CO"
+    assert record["supplier"] == "Martin Brower of Canada Co"
     assert record["invoice_date"] == "10/07/2026"
     assert record["pst"] == "18.18"
     assert record["gst_hst_tps"] == "318.51"
@@ -273,11 +275,13 @@ def test_supplier_invoice_pdf():
     assert record["accounts"]["7428-001"]["tax"] == "0.00"
 
 
-@pytest.mark.skipif(not APPAREL_PDF.is_file(), reason="apparel invoice PDF is not in the repo")
+@pytest.mark.skipif(
+    not APPAREL_PDF.is_file(), reason="apparel invoice PDF is not in the repo"
+)
 def test_extra_gl_account_is_added_after_the_standard_rows():
     record = parse_invoice_bytes(APPAREL_PDF.read_bytes())
     assert record["invoice_number"] == "30039178"
-    assert record["supplier"] == "MARTIN-BROWER OF CANADA CO"
+    assert record["supplier"] == "Martin Brower of Canada Co"
     assert record["invoice_date"] == "02/11/2026"
     assert record["pst"] == "47.01"
     assert record["gst_hst_tps"] == "183.74"
@@ -343,7 +347,7 @@ def test_cli_writes_csv(tmp_path):
     assert text.splitlines()[0].startswith("Supplier,Bill Date,Due Date,Terms,")
     assert "31308266" in text
     assert "10/07/2026" in text
-    assert "MARTIN-BROWER OF CANADA CO" in text
+    assert "Martin Brower of Canada Co" in text
     assert "5020 Food Purchases" in text
     assert "25921.00" in text
     assert "29.19" in text
@@ -506,7 +510,7 @@ def test_bulk_csv_has_a_header_and_one_row_per_invoice(client):
     second = [row for row in rows if row["Bill No"] == "30039178"]
     assert len(first) == 5
     assert len(second) == 5
-    assert first[0]["Supplier"] == "MARTIN-BROWER OF CANADA CO"
+    assert first[0]["Supplier"] == "Martin Brower of Canada Co"
     assert first[0]["Bill Date"] == "10/07/2026"
     assert first[0]["Due Date"] == "10/14/2026"
     assert first[0]["Terms"] == "Net 7"
