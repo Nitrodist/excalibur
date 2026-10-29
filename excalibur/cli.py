@@ -106,9 +106,11 @@ def run(*args, **kwargs):
     help="Write the result to this file instead of printing it.",
 )
 def invoice(pdf, fmt, output):
-    """Read invoice number, invoice date, taxes, due date, G/L nets, and total.
+    """Read invoice number, invoice date, due date, G/L nets, line tax, and total.
 
-    Account amounts are the Net column (before tax) on the G/L summary.
+    Account amounts are the Net column on the G/L summary. Each line's tax
+    is the Tax column on that row. CSV is a QuickBooks Online bill import,
+    one row per G/L account.
     """
     try:
         record = parse_invoice(pdf)

@@ -1,7 +1,9 @@
 """Extract the summary fields from a Martin-Brower invoice PDF.
 
-The G/L figures are the Net column (before tax). On these invoices the net
-amounts plus PST and GST equal Total Order.
+The G/L figures are the Net column and the Tax column on that same row. On
+these invoices the net amounts plus PST and GST equal Total Order. CSV
+downloads are a QuickBooks Online bill import: one row per G/L account,
+including the standard accounts and any extra account in the batch.
 """
 
 import os
@@ -19,20 +21,70 @@ KNOWN_ACCOUNTS = (
     ("7420-001", "OPERATING SUPPLIES"),
     ("7426-001", "TOY PROMOTION"),
     ("7428-001", "GIVE AWAY PROMO"),
+    ("7440-001", "APPAREL ACCESSORY"),
+)
+
+# Printed after "Remit To:" on this supplier's invoices. Example PDFs that
+# omit the line still export under this name.
+DEFAULT_SUPPLIER = "MARTIN-BROWER OF CANADA CO"
+# Martin Brower G/L code -> BDPQ Automation account.
+MB_TO_BDPQ = {
+    "7001-001": "5020 Food Purchases",
+    "7030-001": "5040 Paper Purchases",
+    "7420-001": "5440 Operating Supplies",
+    "7426-001": "4080 Cost of Non-Product Sales",
+    "7428-001": "5380 Promotion - Martin Brower",
+    "7440-001": "5430 Uniforms",
+}
+# BDPQ Automation account -> QuickBooks line description.
+BDPQ_LINE_DESCRIPTION = {
+    "5020 Food Purchases": "Food Purchases",
+    "5040 Paper Purchases": "Paper Purchases",
+    "5440 Operating Supplies": "Ops Supplies Purchase",
+    "4080 Cost of Non-Product Sales": "Non-Product Purchase",
+    "5380 Promotion - Martin Brower": "Monopoly Cost",
+    "5430 Uniforms": "Uniform Purchase",
+}
+# BDPQ Automation account -> QuickBooks tax code. Unmapped accounts use GST.
+BDPQ_TAX_CODE = {
+    "5020 Food Purchases": "GST",
+    "5040 Paper Purchases": "GST",
+    "5440 Operating Supplies": "GST/PST MB",
+    "4080 Cost of Non-Product Sales": "GST",
+    "5380 Promotion - Martin Brower": "Out of Scope",
+    "5430 Uniforms": "GST/PST MB",
+}
+DEFAULT_TAX_CODE = "GST"
+# Headings from the QuickBooks Online bill-import sample, plus the line tax
+# amount taken from each G/L row. Asterisks in that sample mark mandatory
+# fields; they are not part of the column names.
+QBO_COLUMNS = (
+    "Supplier",
+    "Bill Date",
+    "Due Date",
+    "Terms",
+    "Account",
+    "Line Description",
+    "Line Amount",
+    "Line Tax Code",
+    "Line Tax Amount",
+    "Bill No",
 )
 
 _MONEY = r"(-?\d[\d,]*\.\d{2}-?)"
+# The Tax column can be printed as ".11" with no leading zero.
+_GL_MONEY = r"-?(?:\d[\d,]*\.\d{2}|\.\d{2})-?"
 _INVOICE_NUMBER = re.compile(r"Invoice\s*#:\s*(\d+)")
 _INVOICE_DATE = re.compile(r"Invoice Date:\s*(\d{1,2}/\d{1,2}/\d{4})")
+_SUPPLIER = re.compile(r"Remit To:\s*(.+)")
 _GST = re.compile(rf"GST\s*/\s*HST\s*/\s*TPS\s+[\d.]+\s*%\s+({_MONEY})")
 _PST = re.compile(rf"PST(?:\s*-\s*[A-Z]{{2}})?\s+[\d.]+\s*%\s+({_MONEY})")
-_AMOUNT_DUE = re.compile(
-    rf"Amount Due\s+(\d{{1,2}}/\d{{1,2}}/\d{{4}})\s+({_MONEY})"
-)
+_AMOUNT_DUE = re.compile(rf"Amount Due\s+(\d{{1,2}}/\d{{1,2}}/\d{{4}})\s+({_MONEY})")
 _GL_LINE = re.compile(
     rf"^(?P<code>\d{{4}}-\d{{3}})\s+"
     rf"(?P<description>[A-Za-z0-9][A-Za-z0-9 &'/-]*?)\s+"
-    rf"(?:(?P<qty>\d+)\s+)?(?P<net>{_MONEY})",
+    rf"(?:(?P<qty>\d+)\s+)?"
+    rf"(?P<amounts>{_GL_MONEY}(?:\s+{_GL_MONEY})*)",
     re.MULTILINE,
 )
 
@@ -67,6 +119,7 @@ def parse_invoice_text(text):
     """Parse invoice fields from layout-preserved text."""
     invoice_match = _INVOICE_NUMBER.search(text)
     invoice_date_match = _INVOICE_DATE.search(text)
+    supplier_match = _SUPPLIER.search(text)
     gst_match = _GST.search(text)
     pst_match = _PST.search(text)
     due_match = _AMOUNT_DUE.search(text)
@@ -90,8 +143,12 @@ def parse_invoice_text(text):
             + "."
         )
 
+    supplier = DEFAULT_SUPPLIER
+    if supplier_match:
+        supplier = supplier_match.group(1).strip() or DEFAULT_SUPPLIER
     record = {
         "invoice_number": invoice_match.group(1),
+        "supplier": supplier,
         "invoice_date": _normalize_date(invoice_date_match.group(1)),
         "pst": format_money(parse_money(pst_match.group(1))),
         "gst_hst_tps": format_money(parse_money(gst_match.group(1))),
@@ -113,79 +170,83 @@ def to_json(record):
 
 
 def to_csv(record):
-    import csv
-    import io
-
-    headers = [
-        "Invoice Number",
-        "Invoice Date",
-        "PST",
-        "GST / HST / TPS",
-        "Amount Due",
-    ]
-    values = [
-        record["invoice_number"],
-        record["invoice_date"],
-        record["pst"],
-        record["gst_hst_tps"],
-        record["amount_due_date"],
-    ]
-    for code, account in record["accounts"].items():
-        headers.append(f"{code} {account['description']}")
-        values.append(account["net"] or "")
-    headers.append("Total Order")
-    values.append(record["total_order"])
-
-    buffer = io.StringIO()
-    writer = csv.writer(buffer, lineterminator="\n")
-    writer.writerow(headers)
-    writer.writerow(values)
-    return buffer.getvalue()
+    """QuickBooks Online bill import for one invoice, one row per G/L account."""
+    return _quickbooks_csv([record])
 
 
 def to_batch_csv(entries):
-    """One header and one row per invoice.
+    """One header and one QuickBooks bill line per G/L account.
 
-    Standard G/L columns are always present. Accounts that appear on only
-    some of the invoices are added after those columns, and left blank on
-    the invoices that do not have them.
+    Standard accounts are always present. An account that appears on only
+    some of the invoices is still a row on every invoice, with the amount
+    and tax left blank where that invoice does not have it.
     """
+    records = [entry["record"] for entry in entries]
+    columns, descriptions = _batch_account_columns(records)
+    return _quickbooks_csv(records, columns, descriptions)
+
+
+def _quickbooks_csv(records, columns=None, descriptions=None):
     import csv
     import io
 
-    columns, descriptions = _batch_account_columns(
-        [entry["record"] for entry in entries]
-    )
-    headers = [
-        "Filename",
-        "Invoice Number",
-        "Invoice Date",
-        "PST",
-        "GST / HST / TPS",
-        "Amount Due",
-    ]
-    headers.extend(f"{code} {descriptions[code]}" for code in columns)
-    headers.append("Total Order")
-
     buffer = io.StringIO()
     writer = csv.writer(buffer, lineterminator="\n")
-    writer.writerow(headers)
-    for entry in entries:
-        record = entry["record"]
-        row = [
-            entry["filename"],
-            record["invoice_number"],
-            record["invoice_date"],
-            record["pst"],
-            record["gst_hst_tps"],
-            record["amount_due_date"],
-        ]
-        for code in columns:
-            account = record["accounts"].get(code) or {}
-            row.append(account.get("net") or "")
-        row.append(record["total_order"])
-        writer.writerow(row)
+    writer.writerow(QBO_COLUMNS)
+    for record in records:
+        writer.writerows(_quickbooks_rows(record, columns, descriptions))
     return buffer.getvalue()
+
+
+def _quickbooks_rows(record, columns=None, descriptions=None):
+    """Repeat bill fields on every line, as the QuickBooks sample does.
+
+    Line Amount is the Net column and Line Tax Amount is the Tax column.
+    A standard account missing from the invoice stays in the file with
+    those amounts blank.
+    """
+    if columns is None:
+        columns = list(record["accounts"])
+    supplier = record.get("supplier") or DEFAULT_SUPPLIER
+    terms = _payment_terms(record["invoice_date"], record["amount_due_date"])
+    rows = []
+    for code in columns:
+        account = record["accounts"].get(code) or {}
+        description = account.get("description") or (descriptions or {}).get(code, "")
+        account_name, line_description, tax_code = _bdpq_fields(code, description)
+        net = account.get("net") or ""
+        if net:
+            tax_amount = account.get("tax") or "0.00"
+        else:
+            tax_amount = ""
+        rows.append(
+            [
+                supplier,
+                record["invoice_date"],
+                record["amount_due_date"],
+                terms,
+                account_name,
+                line_description,
+                net,
+                tax_code,
+                tax_amount,
+                record["invoice_number"],
+            ]
+        )
+    return rows
+
+
+def _bdpq_fields(code, description):
+    """Map a Martin Brower G/L line onto the BDPQ Automation bill fields."""
+    bdpq = MB_TO_BDPQ.get(code)
+    if not bdpq:
+        label = f"{code} {description}".strip()
+        return label, description, DEFAULT_TAX_CODE
+    return (
+        bdpq,
+        BDPQ_LINE_DESCRIPTION.get(bdpq, description),
+        BDPQ_TAX_CODE.get(bdpq, DEFAULT_TAX_CODE),
+    )
 
 
 def _batch_account_columns(records):
@@ -204,23 +265,26 @@ def _batch_account_columns(records):
     return columns, descriptions
 
 
+def _payment_terms(invoice_date, due_date):
+    bill = datetime.strptime(invoice_date, "%m/%d/%Y")
+    due = datetime.strptime(due_date, "%m/%d/%Y")
+    days = (due - bill).days
+    if days < 0:
+        return ""
+    if days == 0:
+        return "Due on receipt"
+    return f"Net {days}"
+
+
 def display_rows(record):
     """Label/value pairs for the web page, with money grouped in thousands."""
     rows = [
         ("Invoice Number", record["invoice_number"]),
         ("Invoice Date", record["invoice_date"]),
-        ("PST", _display_money(record["pst"])),
-        ("GST / HST / TPS", _display_money(record["gst_hst_tps"])),
         ("Amount Due", record["amount_due_date"]),
     ]
     for code, account in record["accounts"].items():
-        net = account["net"]
-        rows.append(
-            (
-                f"{code} {account['description']}",
-                _display_money(net) if net else "—",
-            )
-        )
+        rows.append((f"{code} {account['description']}", _display_account(account)))
     rows.append(("Total Order", _display_money(record["total_order"])))
     return rows
 
@@ -260,6 +324,14 @@ def _display_money(value):
     return f"{Decimal(value):,.2f}"
 
 
+def _display_account(account):
+    net = account.get("net")
+    if not net:
+        return "—"
+    tax = account.get("tax") or "0.00"
+    return f"{_display_money(net)} (tax {_display_money(tax)})"
+
+
 def _gl_section(text):
     marker = "G/L Acct"
     if marker not in text:
@@ -275,24 +347,45 @@ def _accounts(section):
     found = {}
     for match in _GL_LINE.finditer(section):
         description = re.sub(r"\s+", " ", match.group("description")).strip()
-        found[match.group("code")] = (description, parse_money(match.group("net")))
+        net, tax = _net_and_tax(match.group("amounts"))
+        found[match.group("code")] = (description, net, tax)
 
     accounts = {}
     warnings = []
     # Standard accounts stay in the output even when this invoice omits them.
     for code, canonical in KNOWN_ACCOUNTS:
         if code in found:
-            description, net = found.pop(code)
+            description, net, tax = found.pop(code)
             accounts[code] = {
                 "description": description,
                 "net": format_money(net),
+                "tax": format_money(tax),
             }
         else:
-            accounts[code] = {"description": canonical, "net": None}
+            accounts[code] = {"description": canonical, "net": None, "tax": None}
     for code in sorted(found):
-        description, net = found[code]
-        accounts[code] = {"description": description, "net": format_money(net)}
+        description, net, tax = found[code]
+        accounts[code] = {
+            "description": description,
+            "net": format_money(net),
+            "tax": format_money(tax),
+        }
     return accounts, warnings
+
+
+def _net_and_tax(raw):
+    """Read Net and Tax from the money amounts on a G/L row.
+
+    A full row is Net, Tax, Total. When the Tax column is blank the row has
+    Net and Total only, and the tax amount is zero.
+    """
+    tokens = re.findall(_GL_MONEY, raw)
+    net = parse_money(tokens[0])
+    if len(tokens) >= 3:
+        tax = parse_money(tokens[1])
+    else:
+        tax = Decimal("0.00")
+    return net, tax
 
 
 def _reconciliation_warning(record):

@@ -439,6 +439,7 @@ def bulk():
         return _bulk_error("Format must be html or csv.", fmt, 400)
 
     csv_text = to_batch_csv(entries)
+    line_count = max(len(csv_text.splitlines()) - 1, 0)
     if fmt == "csv":
         return Response(
             csv_text,
@@ -462,5 +463,5 @@ def bulk():
         failures=failures,
         summaries=summaries,
         bulk_csv=csv_text,
-        row_count=len(entries) + 1,
+        line_count=line_count,
     )

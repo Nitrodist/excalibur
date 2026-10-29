@@ -43,7 +43,7 @@
 
   {% if summaries %}
     <h5 class="card-title py-3 mb-0 text-dark font-weight-bold">{{ summaries|length }} invoices</h5>
-    <p class="text-muted">The CSV has a header row and one row per invoice ({{ row_count }} rows).</p>
+    <p class="text-muted">The CSV is a QuickBooks Online bill import: one header and one row per G/L line ({{ line_count }} line items).</p>
     <div class="card depth-1 mb-3">
       <div class="card-body p-0">
         <div class="table-responsive">
