@@ -93,6 +93,8 @@ _MONTHS = (
     "Dec",
 )
 # BDPQ Automation account -> QuickBooks tax code. Unmapped accounts use GST.
+# "GST/PST MB" is Manitoba. A "PST - XX" line on the invoice replaces MB
+# with that province, so "PST - SK" is written as "GST/PST SK".
 BDPQ_TAX_CODE = {
     "5020 Food Purchases": "GST",
     "5040 Paper Purchases": "GST",
@@ -101,6 +103,7 @@ BDPQ_TAX_CODE = {
     "5380 Promotion - Martin Brower": "Out of Scope",
     "5430 Uniforms": "GST/PST MB",
 }
+_GST_PST_TAX_CODE = "GST/PST MB"
 DEFAULT_TAX_CODE = "GST"
 # Headings from the QuickBooks Online bill-import sample, plus the line tax
 # amount taken from each G/L row. Asterisks in that sample mark mandatory
@@ -126,7 +129,9 @@ _SUPPLIER = re.compile(r"Remit To:\s*(.+)")
 _STORE_NUMBER = re.compile(r"Store\s*#:\s*(\d+)")
 _SHIP_TO_STORE = re.compile(r"Ship To:.*?(\d+)\s+Bill To:")
 _GST = re.compile(rf"GST\s*/\s*HST\s*/\s*TPS\s+[\d.]+\s*%\s+({_MONEY})")
-_PST = re.compile(rf"PST(?:\s*-\s*[A-Z]{{2}})?\s+[\d.]+\s*%\s+({_MONEY})")
+_PST = re.compile(
+    rf"PST(?:\s*-\s*(?P<province>[A-Z]{{2}}))?\s+[\d.]+\s*%\s+(?P<amount>{_MONEY})"
+)
 _AMOUNT_DUE = re.compile(rf"Amount Due\s+(\d{{1,2}}/\d{{1,2}}/\d{{4}})\s+({_MONEY})")
 _GL_LINE = re.compile(
     rf"^(?P<code>\d{{4}}-\d{{3}})\s+"
@@ -195,13 +200,15 @@ def parse_invoice_text(text):
             supplier = SUPPLIER_TO_BDPQ.get(supplier)
 
     store_number = store_match.group(1) if store_match else None
+    pst, pst_province = _pst_total(pst_match)
     record = {
         "invoice_number": invoice_match.group(1),
         "supplier": supplier,
         "store_number": store_number,
         "store_code": STORE_NUMBERS.get(store_number) if store_number else None,
         "invoice_date": _normalize_date(invoice_date_match.group(1)),
-        "pst": _optional_tax_total(pst_match),
+        "pst": pst,
+        "pst_province": pst_province,
         "gst_hst_tps": _optional_tax_total(gst_match),
         "amount_due_date": _normalize_date(due_match.group(1)),
         "accounts": accounts,
@@ -316,7 +323,10 @@ def _quickbooks_rows(record, columns=None, descriptions=None):
             continue
         description = account.get("description") or (descriptions or {}).get(code, "")
         account_name, line_description, tax_code = _bdpq_fields(
-            code, description, record.get("store_number")
+            code,
+            description,
+            record.get("store_number"),
+            record.get("pst_province"),
         )
         rows.append(
             [
@@ -349,11 +359,12 @@ def _qbo_line_tax_amount(raw):
     return format_money(tax)
 
 
-def _bdpq_fields(code, description, store_number=None):
+def _bdpq_fields(code, description, store_number=None, pst_province=None):
     """Map a Martin Brower G/L line onto the BDPQ Automation bill fields.
 
     Line description and tax code follow the Martin Brower account. The
-    QuickBooks account name follows the store's client.
+    QuickBooks account name follows the store's client. Combined GST/PST
+    uses the province printed on the invoice's PST line.
     """
     default = MB_TO_BDPQ.get(code)
     account_name = _client_account(code, store_number) or default
@@ -364,8 +375,15 @@ def _bdpq_fields(code, description, store_number=None):
     return (
         account_name,
         BDPQ_LINE_DESCRIPTION.get(lookup, description),
-        BDPQ_TAX_CODE.get(lookup, DEFAULT_TAX_CODE),
+        _line_tax_code(BDPQ_TAX_CODE.get(lookup, DEFAULT_TAX_CODE), pst_province),
     )
+
+
+def _line_tax_code(tax_code, pst_province):
+    """Use the invoice PST province for lines that carry provincial tax."""
+    if tax_code == _GST_PST_TAX_CODE and pst_province:
+        return f"GST/PST {pst_province}"
+    return tax_code
 
 
 def _client_account(code, store_number):
@@ -418,10 +436,13 @@ def invoice_verification(record):
             continue
         tax_amount = Decimal(account.get("tax") or "0")
         _, _, tax_code = _bdpq_fields(
-            code, account.get("description") or "", record.get("store_number")
+            code,
+            account.get("description") or "",
+            record.get("store_number"),
+            record.get("pst_province"),
         )
         line_items += Decimal(net) + tax_amount
-        if tax_code == "GST/PST MB":
+        if tax_code.startswith("GST/PST "):
             gst_pst += tax_amount
         elif tax_code == "GST":
             gst += tax_amount
@@ -479,6 +500,13 @@ def _optional_tax_total(match):
     if not match:
         return format_money(Decimal("0.00"))
     return format_money(parse_money(match.group(1)))
+
+
+def _pst_total(match):
+    """PST amount, and the province from a line such as 'PST - SK'."""
+    if not match:
+        return format_money(Decimal("0.00")), None
+    return format_money(parse_money(match.group("amount"))), match.group("province")
 
 
 def _normalize_date(raw):

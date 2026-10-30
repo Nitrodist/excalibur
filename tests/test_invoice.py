@@ -23,14 +23,15 @@ from excalibur.invoices import (
 from excalibur.www.app import create_app
 from excalibur import configuration as conf
 
-SAMPLE_PDF = Path(__file__).resolve().parents[1] / "PS MB 31308266 Oct-07-2026.pdf"
-APPAREL_PDF = Path(__file__).resolve().parents[1] / "GP MB 30039178 Feb-11-2026.pdf"
-KEN_NO_PST_PDF = Path(__file__).resolve().parents[1] / "KEN MB 31316217 Oct-09-2026.pdf"
-KEN_REFUND_PDF = Path(__file__).resolve().parents[1] / "KEN MB 31368179 Oct-16-2026.pdf"
-KEN_NEGATIVE_TAX_PDF = (
-    Path(__file__).resolve().parents[1] / "KEN MB 31278204 Oct-02-2026.pdf"
-)
-MM_PDF = Path(__file__).resolve().parents[1] / "MM MB 31274871.pdf"
+_ROOT = Path(__file__).resolve().parents[1]
+SAMPLE_PDF = _ROOT / "PS MB 31308266 Oct-07-2026.pdf"
+APPAREL_PDF = _ROOT / "GP MB 30039178 Feb-11-2026.pdf"
+KEN_NO_PST_PDF = _ROOT / "KEN MB 31316217 Oct-09-2026.pdf"
+KEN_REFUND_PDF = _ROOT / "KEN MB 31368179 Oct-16-2026.pdf"
+KEN_NEGATIVE_TAX_PDF = _ROOT / "KEN MB 31278204 Oct-02-2026.pdf"
+MM_PDF = _ROOT / "MM MB 31274871.pdf"
+RD_PDFS = sorted(_ROOT.glob("RD MB *.pdf"))
+MM_PDFS = sorted(_ROOT.glob("MM MB *.pdf"))
 
 REFUND_TEXT = """
 Invoice #:        31368179 RI
@@ -230,6 +231,81 @@ def test_team_ouzy_stores_use_their_promotion_and_uniform_accounts(store_number)
     assert uniforms["Line Description"] == "Uniform Purchase"
     assert uniforms["Line Tax Code"] == "GST/PST MB"
     assert by_amount["15642.81"]["Account"] == "5020 Food Purchases"
+
+
+def test_pst_sk_writes_gst_pst_sk_on_provincial_lines():
+    text = (
+        EXAMPLE_TEXT.replace("PST - MB", "PST - SK")
+        + "7440-001  APPAREL ACCESSORY                   1       224.60      26.94       251.54\n"
+    )
+    record = parse_invoice_text(text)
+    assert record["pst"] == "6.00"
+    assert record["pst_province"] == "SK"
+    rows = list(csv.DictReader(StringIO(to_csv(record))))
+    by_amount = {row["Line Amount"]: row for row in rows}
+    assert by_amount["85.72"]["Line Tax Code"] == "GST/PST SK"
+    assert by_amount["224.60"]["Line Tax Code"] == "GST/PST SK"
+    assert by_amount["15642.81"]["Line Tax Code"] == "GST"
+    assert by_amount["996.88"]["Line Tax Code"] == "Out of Scope"
+    check = invoice_verification(record)
+    assert check["gst_pst"] == Decimal("27.44")
+    assert check["gst"] == Decimal("3.20")
+
+
+def test_pst_mb_keeps_gst_pst_mb():
+    record = parse_invoice_text(EXAMPLE_TEXT)
+    assert record["pst_province"] == "MB"
+    rows = list(csv.DictReader(StringIO(to_csv(record))))
+    operating = [row for row in rows if row["Line Amount"] == "85.72"]
+    assert operating[0]["Line Tax Code"] == "GST/PST MB"
+
+
+def test_invoice_without_a_pst_line_stays_on_gst_pst_mb():
+    text = EXAMPLE_TEXT.replace(
+        "PST - MB                       7.000%      6.00\n",
+        "",
+    )
+    record = parse_invoice_text(text)
+    assert record["pst"] == "0.00"
+    assert record["pst_province"] is None
+    rows = list(csv.DictReader(StringIO(to_csv(record))))
+    operating = [row for row in rows if row["Line Amount"] == "85.72"]
+    assert operating[0]["Line Tax Code"] == "GST/PST MB"
+
+
+def _combined_tax_codes(path):
+    record = parse_invoice_bytes(path.read_bytes())
+    rows = list(csv.DictReader(StringIO(to_csv(record))))
+    combined = {
+        row["Line Tax Code"]
+        for row in rows
+        if row["Line Tax Code"].startswith("GST/PST")
+    }
+    return record, combined
+
+
+@pytest.mark.skipif(not RD_PDFS, reason="Saskatchewan invoices are not in the repo")
+def test_rd_invoices_use_gst_pst_sk():
+    assert RD_PDFS
+    for path in RD_PDFS:
+        record, combined = _combined_tax_codes(path)
+        assert record["pst_province"] == "SK", path.name
+        assert combined == {"GST/PST SK"}, path.name
+        check = invoice_verification(record)
+        assert check["ok"] is True, path.name
+        assert check["gst_pst"] > 0, path.name
+
+
+@pytest.mark.skipif(not MM_PDFS, reason="Manitoba invoices are not in the repo")
+def test_mm_invoices_use_gst_pst_mb():
+    assert MM_PDFS
+    for path in MM_PDFS:
+        record, combined = _combined_tax_codes(path)
+        assert record["pst_province"] is None, path.name
+        assert combined == {"GST/PST MB"}, path.name
+        check = invoice_verification(record)
+        assert check["ok"] is True, path.name
+        assert check["gst_pst"] > 0, path.name
 
 
 def test_rc_foods_store_keeps_the_original_promotion_and_uniform_accounts():
@@ -753,6 +829,38 @@ def test_bulk_csv_has_a_header_and_one_row_per_invoice(client):
     assert second[-1]["Line Description"] == "Uniform Purchase"
     assert second[-1]["Line Tax Code"] == "GST/PST MB"
     assert "Filename" not in rows[0]
+
+
+@pytest.mark.skipif(
+    not RD_PDFS or not MM_PDFS,
+    reason="Saskatchewan and Manitoba invoices are not in the repo",
+)
+def test_bulk_csv_keeps_each_invoice_pst_province(client):
+    saskatchewan = RD_PDFS[0]
+    manitoba = MM_PDFS[0]
+    uploads = [
+        (BytesIO(saskatchewan.read_bytes()), saskatchewan.name),
+        (BytesIO(manitoba.read_bytes()), manitoba.name),
+    ]
+    downloaded = client.post(
+        "/bulk?format=csv",
+        data={"files": uploads},
+        content_type="multipart/form-data",
+    )
+    assert downloaded.status_code == 200
+    rows = list(csv.DictReader(StringIO(downloaded.get_data(as_text=True))))
+    sk_bill = parse_invoice_bytes(saskatchewan.read_bytes())["invoice_number"]
+    mb_bill = parse_invoice_bytes(manitoba.read_bytes())["invoice_number"]
+    sk_codes = {
+        row["Line Tax Code"] for row in rows if row["Bill No"] == sk_bill
+    }
+    mb_codes = {
+        row["Line Tax Code"] for row in rows if row["Bill No"] == mb_bill
+    }
+    assert "GST/PST SK" in sk_codes
+    assert "GST/PST MB" not in sk_codes
+    assert "GST/PST MB" in mb_codes
+    assert "GST/PST SK" not in mb_codes
 
 
 def test_bulk_keeps_successful_invoices_when_one_pdf_fails(client):
