@@ -25,12 +25,8 @@ from excalibur import configuration as conf
 
 SAMPLE_PDF = Path(__file__).resolve().parents[1] / "PS MB 31308266 Oct-07-2026.pdf"
 APPAREL_PDF = Path(__file__).resolve().parents[1] / "GP MB 30039178 Feb-11-2026.pdf"
-KEN_NO_PST_PDF = (
-    Path(__file__).resolve().parents[1] / "KEN MB 31316217 Oct-09-2026.pdf"
-)
-KEN_REFUND_PDF = (
-    Path(__file__).resolve().parents[1] / "KEN MB 31368179 Oct-16-2026.pdf"
-)
+KEN_NO_PST_PDF = Path(__file__).resolve().parents[1] / "KEN MB 31316217 Oct-09-2026.pdf"
+KEN_REFUND_PDF = Path(__file__).resolve().parents[1] / "KEN MB 31368179 Oct-16-2026.pdf"
 KEN_NEGATIVE_TAX_PDF = (
     Path(__file__).resolve().parents[1] / "KEN MB 31278204 Oct-02-2026.pdf"
 )
@@ -123,7 +119,7 @@ def _example_pdf():
 
 def _assert_example(record):
     assert record["invoice_number"] == "31278945"
-    assert record["supplier"] == "Martin Brower of Canada Co"
+    assert record["supplier"] == "Martin Brower of Canada"
     assert record["invoice_date"] == "10/05/2026"
     assert record["pst"] == "6.00"
     assert record["gst_hst_tps"] == "175.07"
@@ -186,11 +182,8 @@ def test_store_code_comes_from_ship_to():
 
 
 def test_invoice_filename_uses_store_bill_and_date():
-    text = (
-        "Store #: 26060\n"
-        + EXAMPLE_TEXT.replace("31278945", "31146799").replace(
-            "10/05/2026", "09/08/2026"
-        )
+    text = "Store #: 26060\n" + EXAMPLE_TEXT.replace("31278945", "31146799").replace(
+        "10/05/2026", "09/08/2026"
     )
     record = parse_invoice_text(text)
     assert invoice_filename(record) == "KEN MB 31146799 Sep-08-2026.pdf"
@@ -235,7 +228,7 @@ def test_csv_is_a_quickbooks_bill_import():
     ]
     assert len(rows) == 5
     food = rows[0]
-    assert food["Supplier"] == "Martin Brower of Canada Co"
+    assert food["Supplier"] == "Martin Brower of Canada"
     assert food["Bill Date"] == "10/05/2026"
     assert food["Due Date"] == "10/12/2026"
     assert "Terms" not in food
@@ -362,7 +355,7 @@ def test_refund_invoice_keeps_negative_amounts():
 def test_supplier_invoice_pdf():
     record = parse_invoice_bytes(SAMPLE_PDF.read_bytes())
     assert record["invoice_number"] == "31308266"
-    assert record["supplier"] == "Martin Brower of Canada Co"
+    assert record["supplier"] == "Martin Brower of Canada"
     assert record["invoice_date"] == "10/07/2026"
     assert record["pst"] == "18.18"
     assert record["gst_hst_tps"] == "318.51"
@@ -440,7 +433,7 @@ def test_negative_line_tax_is_written_as_zero():
 def test_extra_gl_account_is_added_after_the_standard_rows():
     record = parse_invoice_bytes(APPAREL_PDF.read_bytes())
     assert record["invoice_number"] == "30039178"
-    assert record["supplier"] == "Martin Brower of Canada Co"
+    assert record["supplier"] == "Martin Brower of Canada"
     assert record["invoice_date"] == "02/11/2026"
     assert record["pst"] == "47.01"
     assert record["gst_hst_tps"] == "183.74"
@@ -506,7 +499,7 @@ def test_cli_writes_csv(tmp_path):
     assert text.splitlines()[0].startswith("Supplier,Bill Date,Due Date,Account,")
     assert "31308266" in text
     assert "10/07/2026" in text
-    assert "Martin Brower of Canada Co" in text
+    assert "Martin Brower of Canada" in text
     assert "5020 Food Purchases" in text
     assert "25921.00" in text
     assert "29.19" in text
@@ -669,7 +662,7 @@ def test_bulk_csv_has_a_header_and_one_row_per_invoice(client):
     second = [row for row in rows if row["Bill No"] == "30039178"]
     assert len(first) == 5
     assert len(second) == 5
-    assert first[0]["Supplier"] == "Martin Brower of Canada Co"
+    assert first[0]["Supplier"] == "Martin Brower of Canada"
     assert first[0]["Bill Date"] == "10/07/2026"
     assert first[0]["Due Date"] == "10/14/2026"
     assert "Terms" not in first[0]

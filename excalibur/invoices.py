@@ -26,11 +26,11 @@ KNOWN_ACCOUNTS = (
 
 # Printed after "Remit To:" on this supplier's invoices. Example PDFs that
 # omit the line still export under this name.
-DEFAULT_SUPPLIER = "Martin Brower of Canada Co"
+DEFAULT_SUPPLIER = "Martin Brower of Canada"
 
 # Martin Brower G/L code -> BDPQ Automation account.
 SUPPLIER_TO_BDPQ = {
-    "MARTIN-BROWER OF CANADA CO": "Martin Brower of Canada Co",
+    "MARTIN-BROWER OF CANADA CO": "Martin Brower of Canada",
 }
 # Martin Brower G/L code -> BDPQ Automation account.
 MB_TO_BDPQ = {
