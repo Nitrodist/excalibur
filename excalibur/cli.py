@@ -5,7 +5,13 @@ import click
 
 from . import __version__, settings
 from . import configuration as conf
-from .invoices import InvoiceParseError, parse_invoice, to_csv, to_json
+from .invoices import (
+    InvoiceParseError,
+    parse_invoice,
+    rename_invoice_paths,
+    to_csv,
+    to_json,
+)
 from .operators.python_operator import PythonOperator
 from .tasks import extract, split
 from .utils.database import initialize_database, reset_database
@@ -124,3 +130,33 @@ def invoice(pdf, fmt, output):
         click.echo(f"Wrote {output}")
         return
     click.echo(payload, nl=False)
+
+
+@cli.command("rename-invoices")
+@click.argument(
+    "pdfs",
+    nargs=-1,
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+)
+@click.option(
+    "-n",
+    "--dry-run",
+    is_flag=True,
+    help="Print the new names without renaming the files.",
+)
+def rename_invoices(pdfs, dry_run):
+    """Rename invoice PDFs to '{store} {bill number} {Mon-DD-YYYY}.pdf'."""
+    renamed, failures = rename_invoice_paths(pdfs, dry_run=dry_run)
+    for source, destination in renamed:
+        if source.resolve() == destination.resolve():
+            click.echo(f"{source.name} already has the target name")
+        else:
+            verb = "Would rename" if dry_run else "Renamed"
+            click.echo(f"{verb} {source.name} -> {destination.name}")
+    for source, error in failures:
+        click.echo(f"{source.name}: {error}", err=True)
+    if failures:
+        raise click.ClickException(
+            f"{len(failures)} of {len(pdfs)} PDF(s) could not be renamed."
+        )

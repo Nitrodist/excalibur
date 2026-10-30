@@ -1,5 +1,6 @@
 import csv
 import json
+import shutil
 from decimal import Decimal
 from io import BytesIO, StringIO
 from pathlib import Path
@@ -12,9 +13,11 @@ from reportlab.pdfgen import canvas
 from excalibur.cli import cli
 from excalibur.invoices import (
     InvoiceParseError,
+    invoice_filename,
     invoice_verification,
     parse_invoice_bytes,
     parse_invoice_text,
+    rename_invoice_pdf,
     to_csv,
 )
 from excalibur.www.app import create_app
@@ -31,6 +34,7 @@ KEN_REFUND_PDF = (
 KEN_NEGATIVE_TAX_PDF = (
     Path(__file__).resolve().parents[1] / "KEN MB 31278204 Oct-02-2026.pdf"
 )
+MM_PDF = Path(__file__).resolve().parents[1] / "MM MB 31274871.pdf"
 
 REFUND_TEXT = """
 Invoice #:        31368179 RI
@@ -169,6 +173,50 @@ def test_supplier_comes_from_remit_to():
     text = "CoOp Manitoba Remit To: EXAMPLE SUPPLIER LTD\n" + EXAMPLE_TEXT
     record = parse_invoice_text(text)
     assert record["supplier"] == "EXAMPLE SUPPLIER LTD"
+
+
+def test_store_code_comes_from_ship_to():
+    text = (
+        "Ship To: MCDONALD'S 26060                    Bill To:     "
+        "GUEST FIRST HOSPITALITY INC\n" + EXAMPLE_TEXT
+    )
+    record = parse_invoice_text(text)
+    assert record["store_number"] == "26060"
+    assert record["store_code"] == "KEN MB"
+
+
+def test_invoice_filename_uses_store_bill_and_date():
+    text = (
+        "Store #: 26060\n"
+        + EXAMPLE_TEXT.replace("31278945", "31146799").replace(
+            "10/05/2026", "09/08/2026"
+        )
+    )
+    record = parse_invoice_text(text)
+    assert invoice_filename(record) == "KEN MB 31146799 Sep-08-2026.pdf"
+
+
+def test_rename_invoices_cli_appends_the_date(tmp_path):
+    if not MM_PDF.is_file():
+        pytest.skip("MM invoice PDF is not in the repo")
+    copied = tmp_path / MM_PDF.name
+    shutil.copy(MM_PDF, copied)
+    result = CliRunner().invoke(cli, ["rename-invoices", str(copied)])
+    assert result.exit_code == 0, result.output
+    renamed = tmp_path / "MM MB 31274871 Oct-02-2026.pdf"
+    assert renamed.is_file()
+    assert not copied.exists()
+    assert "MM MB 31274871 Oct-02-2026.pdf" in result.output
+
+
+def test_rename_invoice_pdf_is_a_no_op_when_already_named(tmp_path):
+    if not MM_PDF.is_file():
+        pytest.skip("MM invoice PDF is not in the repo")
+    destination = tmp_path / "MM MB 31274871 Oct-02-2026.pdf"
+    shutil.copy(MM_PDF, destination)
+    result = rename_invoice_pdf(destination)
+    assert result == destination
+    assert destination.is_file()
 
 
 def test_csv_is_a_quickbooks_bill_import():

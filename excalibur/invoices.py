@@ -50,6 +50,41 @@ BDPQ_LINE_DESCRIPTION = {
     "5380 Promotion - Martin Brower": "Monopoly Cost",
     "5430 Uniforms": "Uniform Purchase",
 }
+# Short store code -> McDonald's store number, as printed after Ship To.
+STORE_CODES = {
+    "22ND MB": "1597",
+    "AN MB": "3983",
+    "CC MB": "40485",
+    "CL MB": "14203",
+    "CM MB": "40345",
+    "GP MB": "1187",
+    "KEN MB": "26060",
+    "MM MB": "29036",
+    "MN MB": "40806",
+    "PS MB": "7094",
+    "RD MB": "10822",
+    "SEA MB": "40700",
+    "SHER MB": "26056",
+    "STJ MB": "26020",
+    "STJWM MB": "29033",
+    "WR MB": "7504",
+    "WW MB": "15611",
+}
+STORE_NUMBERS = {number: code for code, number in STORE_CODES.items()}
+_MONTHS = (
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+)
 # BDPQ Automation account -> QuickBooks tax code. Unmapped accounts use GST.
 BDPQ_TAX_CODE = {
     "5020 Food Purchases": "GST",
@@ -81,6 +116,8 @@ _GL_MONEY = r"-?(?:\d[\d,]*\.\d{2}|\.\d{2})-?"
 _INVOICE_NUMBER = re.compile(r"Invoice\s*#:\s*(\d+)")
 _INVOICE_DATE = re.compile(r"Invoice Date:\s*(\d{1,2}/\d{1,2}/\d{4})")
 _SUPPLIER = re.compile(r"Remit To:\s*(.+)")
+_STORE_NUMBER = re.compile(r"Store\s*#:\s*(\d+)")
+_SHIP_TO_STORE = re.compile(r"Ship To:.*?(\d+)\s+Bill To:")
 _GST = re.compile(rf"GST\s*/\s*HST\s*/\s*TPS\s+[\d.]+\s*%\s+({_MONEY})")
 _PST = re.compile(rf"PST(?:\s*-\s*[A-Z]{{2}})?\s+[\d.]+\s*%\s+({_MONEY})")
 _AMOUNT_DUE = re.compile(rf"Amount Due\s+(\d{{1,2}}/\d{{1,2}}/\d{{4}})\s+({_MONEY})")
@@ -124,6 +161,7 @@ def parse_invoice_text(text):
     invoice_match = _INVOICE_NUMBER.search(text)
     invoice_date_match = _INVOICE_DATE.search(text)
     supplier_match = _SUPPLIER.search(text)
+    store_match = _STORE_NUMBER.search(text) or _SHIP_TO_STORE.search(text)
     gst_match = _GST.search(text)
     pst_match = _PST.search(text)
     due_match = _AMOUNT_DUE.search(text)
@@ -149,9 +187,12 @@ def parse_invoice_text(text):
         if SUPPLIER_TO_BDPQ.get(supplier):
             supplier = SUPPLIER_TO_BDPQ.get(supplier)
 
+    store_number = store_match.group(1) if store_match else None
     record = {
         "invoice_number": invoice_match.group(1),
         "supplier": supplier,
+        "store_number": store_number,
+        "store_code": STORE_NUMBERS.get(store_number) if store_number else None,
         "invoice_date": _normalize_date(invoice_date_match.group(1)),
         "pst": _optional_tax_total(pst_match),
         "gst_hst_tps": _optional_tax_total(gst_match),
@@ -170,6 +211,57 @@ def to_json(record):
     import json
 
     return json.dumps(record, indent=2) + "\n"
+
+
+def invoice_filename(record):
+    """'{store} {bill no} {Mon-DD-YYYY}.pdf' for a parsed invoice."""
+    store_code = record.get("store_code")
+    if not store_code:
+        number = record.get("store_number") or "unknown"
+        raise InvoiceParseError(f"Store number {number} is not in the store map.")
+    return (
+        f"{store_code} {record['invoice_number']} "
+        f"{_filename_date(record['invoice_date'])}.pdf"
+    )
+
+
+def rename_invoice_pdf(path, dry_run=False):
+    """Rename one invoice PDF in place. Returns the destination path."""
+    from pathlib import Path
+
+    source = Path(path)
+    record = parse_invoice(str(source))
+    destination = source.with_name(invoice_filename(record))
+    if destination.resolve() == source.resolve():
+        return destination
+    if destination.exists():
+        raise InvoiceParseError(
+            f"{source.name} would overwrite existing file {destination.name}."
+        )
+    if not dry_run:
+        source.rename(destination)
+    return destination
+
+
+def rename_invoice_paths(paths, dry_run=False):
+    """Rename each PDF. Returns (renamed, failures) path/message pairs."""
+    from pathlib import Path
+
+    renamed = []
+    failures = []
+    for path in paths:
+        source = Path(path)
+        try:
+            destination = rename_invoice_pdf(source, dry_run=dry_run)
+            renamed.append((source, destination))
+        except Exception as exc:
+            failures.append((source, str(exc)))
+    return renamed, failures
+
+
+def _filename_date(invoice_date):
+    parsed = datetime.strptime(invoice_date, "%m/%d/%Y")
+    return f"{_MONTHS[parsed.month - 1]}-{parsed.day:02d}-{parsed.year}"
 
 
 def to_csv(record):
