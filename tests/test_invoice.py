@@ -212,6 +212,38 @@ def test_rename_invoice_pdf_is_a_no_op_when_already_named(tmp_path):
     assert destination.is_file()
 
 
+@pytest.mark.parametrize("store_number", ["14203", "15611", "26020", "29033"])
+def test_team_ouzy_stores_use_their_promotion_and_uniform_accounts(store_number):
+    text = (
+        f"Store #: {store_number}\n"
+        + EXAMPLE_TEXT
+        + "7440-001  APPAREL ACCESSORY                   1       224.60      26.94       251.54\n"
+    )
+    rows = list(csv.DictReader(StringIO(to_csv(parse_invoice_text(text)))))
+    by_amount = {row["Line Amount"]: row for row in rows}
+    promo = by_amount["996.88"]
+    assert promo["Account"] == "5345 Promotion - Martin Brower"
+    assert promo["Line Description"] == "Monopoly Cost"
+    assert promo["Line Tax Code"] == "Out of Scope"
+    uniforms = by_amount["224.60"]
+    assert uniforms["Account"] == "5420 Uniforms"
+    assert uniforms["Line Description"] == "Uniform Purchase"
+    assert uniforms["Line Tax Code"] == "GST/PST MB"
+    assert by_amount["15642.81"]["Account"] == "5020 Food Purchases"
+
+
+def test_rc_foods_store_keeps_the_original_promotion_and_uniform_accounts():
+    text = (
+        "Store #: 26060\n"
+        + EXAMPLE_TEXT
+        + "7440-001  APPAREL ACCESSORY                   1       224.60      26.94       251.54\n"
+    )
+    rows = list(csv.DictReader(StringIO(to_csv(parse_invoice_text(text)))))
+    by_amount = {row["Line Amount"]: row for row in rows}
+    assert by_amount["996.88"]["Account"] == "5380 Promotion - Martin Brower"
+    assert by_amount["224.60"]["Account"] == "5430 Uniforms"
+
+
 def test_csv_is_a_quickbooks_bill_import():
     text = to_csv(parse_invoice_text(EXAMPLE_TEXT))
     rows = list(csv.DictReader(StringIO(text)))

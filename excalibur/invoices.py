@@ -41,6 +41,13 @@ MB_TO_BDPQ = {
     "7428-001": "5380 Promotion - Martin Brower",
     "7440-001": "5430 Uniforms",
 }
+# RC Foods uses MB_TO_BDPQ. Team Ouzzy uses different account numbers for
+# the same Martin Brower promotion and uniform lines.
+TEAM_OUZZY_STORES = frozenset({"14203", "15611", "26020", "29033"})
+TEAM_OUZZY_ACCOUNTS = {
+    "7428-001": "5345 Promotion - Martin Brower",
+    "7440-001": "5420 Uniforms",
+}
 # BDPQ Automation account -> QuickBooks line description.
 BDPQ_LINE_DESCRIPTION = {
     "5020 Food Purchases": "Food Purchases",
@@ -308,7 +315,9 @@ def _quickbooks_rows(record, columns=None, descriptions=None):
         if net in (None, ""):
             continue
         description = account.get("description") or (descriptions or {}).get(code, "")
-        account_name, line_description, tax_code = _bdpq_fields(code, description)
+        account_name, line_description, tax_code = _bdpq_fields(
+            code, description, record.get("store_number")
+        )
         rows.append(
             [
                 supplier,
@@ -340,17 +349,29 @@ def _qbo_line_tax_amount(raw):
     return format_money(tax)
 
 
-def _bdpq_fields(code, description):
-    """Map a Martin Brower G/L line onto the BDPQ Automation bill fields."""
-    bdpq = MB_TO_BDPQ.get(code)
-    if not bdpq:
+def _bdpq_fields(code, description, store_number=None):
+    """Map a Martin Brower G/L line onto the BDPQ Automation bill fields.
+
+    Line description and tax code follow the Martin Brower account. The
+    QuickBooks account name follows the store's client.
+    """
+    default = MB_TO_BDPQ.get(code)
+    account_name = _client_account(code, store_number) or default
+    if not account_name:
         label = f"{code} {description}".strip()
         return label, description, DEFAULT_TAX_CODE
+    lookup = default or account_name
     return (
-        bdpq,
-        BDPQ_LINE_DESCRIPTION.get(bdpq, description),
-        BDPQ_TAX_CODE.get(bdpq, DEFAULT_TAX_CODE),
+        account_name,
+        BDPQ_LINE_DESCRIPTION.get(lookup, description),
+        BDPQ_TAX_CODE.get(lookup, DEFAULT_TAX_CODE),
     )
+
+
+def _client_account(code, store_number):
+    if store_number in TEAM_OUZZY_STORES:
+        return TEAM_OUZZY_ACCOUNTS.get(code)
+    return None
 
 
 def _batch_account_columns(records):
@@ -396,7 +417,9 @@ def invoice_verification(record):
         if net in (None, ""):
             continue
         tax_amount = Decimal(account.get("tax") or "0")
-        _, _, tax_code = _bdpq_fields(code, account.get("description") or "")
+        _, _, tax_code = _bdpq_fields(
+            code, account.get("description") or "", record.get("store_number")
+        )
         line_items += Decimal(net) + tax_amount
         if tax_code == "GST/PST MB":
             gst_pst += tax_amount
