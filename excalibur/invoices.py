@@ -29,6 +29,7 @@ KNOWN_ACCOUNTS = (
 # uses a hyphen.
 DEFAULT_SUPPLIER = "Martin Brower of Canada"
 CHASON_SUPPLIER = "Martin-Brower of Canada Co"
+TASS_SUPPLIER = "Martin-Brower of Canada Co"
 
 # Martin Brower G/L code -> BDPQ Automation account.
 SUPPLIER_TO_BDPQ = {
@@ -55,6 +56,13 @@ TEAM_OUZZY_ACCOUNTS = {
 # the same Martin Brower promotion and uniform lines.
 CHASON_STORES = frozenset({"10822", "3983"})
 CHASON_ACCOUNTS = {
+    "7428-001": "5350 Promotion - Martin Brower",
+    "7440-001": "5420 Uniforms",
+}
+# Chason uses MB_TO_BDPQ. Chason uses different account numbers for
+# the same Martin Brower promotion and uniform lines.
+TASS_STORES = frozenset({"1597", "40345", "40485"})
+TASS_ACCOUNTS = {
     "7428-001": "5350 Promotion - Martin Brower",
     "7440-001": "5420 Uniforms",
 }
@@ -401,6 +409,8 @@ def _supplier_for_store(supplier, store_number):
     """Chason's vendor name is hyphenated. Other clients are not."""
     if store_number in CHASON_STORES and supplier == DEFAULT_SUPPLIER:
         return CHASON_SUPPLIER
+    if store_number in TASS_STORES and supplier == DEFAULT_SUPPLIER:
+        return TASS_SUPPLIER
     return supplier
 
 
@@ -409,6 +419,8 @@ def _client_account(code, store_number):
         return TEAM_OUZZY_ACCOUNTS.get(code)
     if store_number in CHASON_STORES:
         return CHASON_ACCOUNTS.get(code)
+    if store_number in TASS_STORES:
+        return TASS_ACCOUNTS.get(code)
     return None
 
 
