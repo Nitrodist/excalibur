@@ -48,6 +48,14 @@ TEAM_OUZZY_ACCOUNTS = {
     "7428-001": "5345 Promotion - Martin Brower",
     "7440-001": "5420 Uniforms",
 }
+
+# Chason uses MB_TO_BDPQ. Chason uses different account numbers for
+# the same Martin Brower promotion and uniform lines.
+CHASON_STORES = frozenset({"6210", "3983"})
+CHASON_ACCOUNTS = {
+    "7428-001": "5350 Promotion - Martin Brower",
+    "7440-001": "5420 Uniforms",
+}
 # BDPQ Automation account -> QuickBooks line description.
 BDPQ_LINE_DESCRIPTION = {
     "5020 Food Purchases": "Food Purchases",
@@ -389,6 +397,8 @@ def _line_tax_code(tax_code, pst_province):
 def _client_account(code, store_number):
     if store_number in TEAM_OUZZY_STORES:
         return TEAM_OUZZY_ACCOUNTS.get(code)
+    if store_number in CHASON_STORES:
+        return CHASON_ACCOUNTS.get(code)
     return None
 
 
