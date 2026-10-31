@@ -28,7 +28,7 @@ KNOWN_ACCOUNTS = (
 # omit the line still export under this name. Chason's QuickBooks vendor
 # uses a hyphen.
 DEFAULT_SUPPLIER = "Martin Brower of Canada"
-CHASON_SUPPLIER = "Martin-Brower of Canada"
+CHASON_SUPPLIER = "Martin-Brower of Canada Co"
 
 # Martin Brower G/L code -> BDPQ Automation account.
 SUPPLIER_TO_BDPQ = {

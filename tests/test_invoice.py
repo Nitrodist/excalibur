@@ -172,13 +172,16 @@ def test_supplier_comes_from_remit_to():
     assert record["supplier"] == "EXAMPLE SUPPLIER LTD"
 
 
-@pytest.mark.parametrize("store_number", ["6210", "3983"])
+@pytest.mark.parametrize("store_number", ["10822", "3983"])
 def test_chason_stores_use_the_hyphenated_supplier_name(store_number):
-    text = f"Store #: {store_number}\nRemit To: MARTIN-BROWER OF CANADA CO\n" + EXAMPLE_TEXT
+    text = (
+        f"Store #: {store_number}\nRemit To: MARTIN-BROWER OF CANADA CO\n"
+        + EXAMPLE_TEXT
+    )
     record = parse_invoice_text(text)
-    assert record["supplier"] == "Martin-Brower of Canada"
+    assert record["supplier"] == "Martin-Brower of Canada Co"
     rows = list(csv.DictReader(StringIO(to_csv(record))))
-    assert rows[0]["Supplier"] == "Martin-Brower of Canada"
+    assert rows[0]["Supplier"] == "Martin-Brower of Canada Co"
 
 
 def test_other_stores_keep_the_unhyphenated_supplier_name():
@@ -868,12 +871,8 @@ def test_bulk_csv_keeps_each_invoice_pst_province(client):
     rows = list(csv.DictReader(StringIO(downloaded.get_data(as_text=True))))
     sk_bill = parse_invoice_bytes(saskatchewan.read_bytes())["invoice_number"]
     mb_bill = parse_invoice_bytes(manitoba.read_bytes())["invoice_number"]
-    sk_codes = {
-        row["Line Tax Code"] for row in rows if row["Bill No"] == sk_bill
-    }
-    mb_codes = {
-        row["Line Tax Code"] for row in rows if row["Bill No"] == mb_bill
-    }
+    sk_codes = {row["Line Tax Code"] for row in rows if row["Bill No"] == sk_bill}
+    mb_codes = {row["Line Tax Code"] for row in rows if row["Bill No"] == mb_bill}
     assert "GST/PST SK" in sk_codes
     assert "GST/PST MB" not in sk_codes
     assert "GST/PST MB" in mb_codes
