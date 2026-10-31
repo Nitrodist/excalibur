@@ -31,6 +31,7 @@ DEFAULT_SUPPLIER = "Martin Brower of Canada"
 CHASON_SUPPLIER = "Martin-Brower of Canada Co"
 TASS_SUPPLIER = "Martin-Brower of Canada Co"
 EINARSON_SUPPLIER = "Martin-Brower of Canada Co"
+GUEST_FIRST_SUPPLIER = "Martin-Brower of Canada Co"
 
 # Martin Brower G/L code -> BDPQ Automation account.
 SUPPLIER_TO_BDPQ = {
@@ -67,6 +68,13 @@ TASS_ACCOUNTS = {
     "7428-001": "5350 Promotion - Martin Brower",
     "7440-001": "5420 Uniforms",
 }
+# Guest First uses MB_TO_BDPQ. Chason uses different account numbers for
+# the same Martin Brower promotion and uniform lines.
+GUEST_FIRST_STORES = frozenset({"29036"})
+GUEST_FIRST_ACCOUNTS = {
+    "7428-001": "5350 Promotion - Martin Brower",
+    "7440-001": "5420 Uniforms",
+}
 # Chason uses MB_TO_BDPQ. Chason uses different account numbers for
 # the same Martin Brower promotion and uniform lines.
 EINARSON_STORES = frozenset({"40806", "7504"})
@@ -74,8 +82,6 @@ EINARSON_ACCOUNTS = {
     "7428-001": "5350 Promotion - Martin Brower",
     "7440-001": "5420 Uniforms",
 }
-
-
 
 
 # BDPQ Automation account -> QuickBooks line description.
@@ -135,6 +141,9 @@ BDPQ_TAX_CODE = {
 }
 _GST_PST_TAX_CODE = "GST/PST MB"
 DEFAULT_TAX_CODE = "GST"
+# Guest First (MM MB, store 29036) is in Ontario, which charges HST only.
+GUEST_FIRST_STORES = frozenset({"29036"})
+GUEST_FIRST_TAX_CODE = "HST ON"
 # Headings from the QuickBooks Online bill-import sample, plus the line tax
 # amount taken from each G/L row. Asterisks in that sample mark mandatory
 # fields; they are not part of the column names.
@@ -158,7 +167,9 @@ _INVOICE_DATE = re.compile(r"Invoice Date:\s*(\d{1,2}/\d{1,2}/\d{4})")
 _SUPPLIER = re.compile(r"Remit To:\s*(.+)")
 _STORE_NUMBER = re.compile(r"Store\s*#:\s*(\d+)")
 _SHIP_TO_STORE = re.compile(r"Ship To:.*?(\d+)\s+Bill To:")
-_GST = re.compile(rf"GST\s*/\s*HST\s*/\s*TPS\s+[\d.]+\s*%\s+({_MONEY})")
+# GST invoices print a percent sign ("5.000%"). Ontario HST invoices omit it
+# ("13.000").
+_GST = re.compile(rf"GST\s*/\s*HST\s*/\s*TPS\s+[\d.]+(?:\s*%)?\s+({_MONEY})")
 _PST = re.compile(
     rf"PST(?:\s*-\s*(?P<province>[A-Z]{{2}}))?\s+[\d.]+\s*%\s+(?P<amount>{_MONEY})"
 )
@@ -401,19 +412,36 @@ def _bdpq_fields(code, description, store_number=None, pst_province=None):
     account_name = _client_account(code, store_number) or default
     if not account_name:
         label = f"{code} {description}".strip()
-        return label, description, DEFAULT_TAX_CODE
+        return (
+            label,
+            description,
+            _line_tax_code(DEFAULT_TAX_CODE, pst_province, store_number),
+        )
     lookup = default or account_name
     return (
         account_name,
         BDPQ_LINE_DESCRIPTION.get(lookup, description),
-        _line_tax_code(BDPQ_TAX_CODE.get(lookup, DEFAULT_TAX_CODE), pst_province),
+        _line_tax_code(
+            BDPQ_TAX_CODE.get(lookup, DEFAULT_TAX_CODE),
+            pst_province,
+            store_number,
+        ),
     )
 
 
-def _line_tax_code(tax_code, pst_province):
-    """Use the invoice PST province for lines that carry provincial tax."""
+def _line_tax_code(tax_code, pst_province, store_number=None):
+    """Use the invoice PST province, then the client's tax code.
+
+    Guest First replaces both GST and GST/PST with Ontario HST. Other
+    clients keep GST, and replace MB on a GST/PST line with the province
+    printed on the invoice.
+    """
     if tax_code == _GST_PST_TAX_CODE and pst_province:
-        return f"GST/PST {pst_province}"
+        tax_code = f"GST/PST {pst_province}"
+    if store_number in GUEST_FIRST_STORES and (
+        tax_code == "GST" or tax_code.startswith("GST/PST ")
+    ):
+        return GUEST_FIRST_TAX_CODE
     return tax_code
 
 
@@ -425,6 +453,8 @@ def _supplier_for_store(supplier, store_number):
         return TASS_SUPPLIER
     if store_number in EINARSON_STORES and supplier == DEFAULT_SUPPLIER:
         return EINARSON_SUPPLIER
+    if store_number in GUEST_FIRST_STORES and supplier == DEFAULT_SUPPLIER:
+        return GUEST_FIRST_SUPPLIER
     return supplier
 
 
@@ -437,6 +467,8 @@ def _client_account(code, store_number):
         return TASS_ACCOUNTS.get(code)
     if store_number in EINARSON_STORES:
         return EINARSON_ACCOUNTS.get(code)
+    if store_number in GUEST_FIRST_STORES:
+        return GUEST_FIRST_ACCOUNTS.get(code)
     return None
 
 
@@ -472,11 +504,12 @@ def display_rows(record):
 def invoice_verification(record):
     """Compare the tax-inclusive total owing to the exported bill lines.
 
-    GST and GST/PST are the Line Tax Amounts grouped by the mapped tax code.
-    The remainder is Total Order minus those line amounts and line taxes.
+    GST, GST/PST, and HST are the Line Tax Amounts grouped by the mapped tax
+    code. The remainder is Total Order minus those line amounts and line taxes.
     """
     gst = Decimal("0.00")
     gst_pst = Decimal("0.00")
+    hst = Decimal("0.00")
     line_items = Decimal("0.00")
     for code, account in record["accounts"].items():
         net = account.get("net")
@@ -492,6 +525,8 @@ def invoice_verification(record):
         line_items += Decimal(net) + tax_amount
         if tax_code.startswith("GST/PST "):
             gst_pst += tax_amount
+        elif tax_code == GUEST_FIRST_TAX_CODE:
+            hst += tax_amount
         elif tax_code == "GST":
             gst += tax_amount
     total = Decimal(record["total_order"])
@@ -499,6 +534,7 @@ def invoice_verification(record):
     return {
         "gst": gst.quantize(Decimal("0.01")),
         "gst_pst": gst_pst.quantize(Decimal("0.01")),
+        "hst": hst.quantize(Decimal("0.01")),
         "line_items": line_items.quantize(Decimal("0.01")),
         "total": total,
         "difference": difference,
@@ -512,6 +548,7 @@ def display_verification(record):
     return {
         "gst": _display_money(check["gst"]),
         "gst_pst": _display_money(check["gst_pst"]),
+        "hst": _display_money(check["hst"]),
         "difference": _display_money(check["difference"]),
         "ok": check["ok"],
     }
@@ -629,6 +666,11 @@ def _net_and_tax(raw):
 
 
 def _reconciliation_warning(record):
+    """G/L nets plus the invoice tax totals should equal Total Order.
+
+    Manitoba and Saskatchewan invoices print GST and PST. Ontario HST is the
+    single GST/HST/TPS amount, with no PST line.
+    """
     nets = []
     for account in record["accounts"].values():
         if account["net"] is None:
@@ -642,10 +684,18 @@ def _reconciliation_warning(record):
     total = Decimal(record["total_order"])
     if expected != total:
         return (
-            "Net amounts plus PST and GST equal "
+            f"Net amounts plus {_reconciliation_tax_name(record)} equal "
             f"{expected:,.2f}, which does not match Total Order {total:,.2f}."
         )
     return None
+
+
+def _reconciliation_tax_name(record):
+    if record.get("store_number") in GUEST_FIRST_STORES:
+        return "HST"
+    if Decimal(record["pst"]) != 0:
+        return "PST and GST"
+    return "GST"
 
 
 def _page_lines(page, y_tol=2.0, space_gap=2.2):

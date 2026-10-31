@@ -67,6 +67,9 @@
                   <td class="text-right{% if not summary.verification.ok %} text-danger{% endif %}">
                     <div>GST {{ summary.verification.gst }}</div>
                     <div>GST/PST {{ summary.verification.gst_pst }}</div>
+                    {% if summary.verification.hst != "0.00" %}
+                      <div>HST {{ summary.verification.hst }}</div>
+                    {% endif %}
                     <div>Total − lines {{ summary.verification.difference }}</div>
                   </td>
                 </tr>

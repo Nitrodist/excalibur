@@ -316,16 +316,48 @@ def test_rd_invoices_use_gst_pst_sk():
         assert check["gst_pst"] > 0, path.name
 
 
-@pytest.mark.skipif(not MM_PDFS, reason="Manitoba invoices are not in the repo")
-def test_mm_invoices_use_gst_pst_mb():
+def test_guest_first_store_uses_ontario_hst():
+    text = (
+        "Store #: 29036\n"
+        + EXAMPLE_TEXT
+        + "7440-001  APPAREL ACCESSORY                   1       224.60      26.94       251.54\n"
+    )
+    record = parse_invoice_text(text)
+    rows = list(csv.DictReader(StringIO(to_csv(record))))
+    by_amount = {row["Line Amount"]: row for row in rows}
+    assert by_amount["15642.81"]["Line Tax Code"] == "HST ON"
+    assert by_amount["85.72"]["Line Tax Code"] == "HST ON"
+    assert by_amount["224.60"]["Line Tax Code"] == "HST ON"
+    assert by_amount["996.88"]["Line Tax Code"] == "Out of Scope"
+    check = invoice_verification(record)
+    assert check["hst"] == Decimal("30.64")
+    assert check["gst"] == Decimal("0.00")
+    assert check["gst_pst"] == Decimal("0.00")
+
+
+@pytest.mark.skipif(not MM_PDFS, reason="Guest First invoices are not in the repo")
+def test_mm_invoices_use_hst_on():
     assert MM_PDFS
     for path in MM_PDFS:
-        record, combined = _combined_tax_codes(path)
-        assert record["pst_province"] is None, path.name
-        assert combined == {"GST/PST MB"}, path.name
+        record = parse_invoice_bytes(path.read_bytes())
+        assert record["store_number"] == "29036", path.name
+        rows = list(csv.DictReader(StringIO(to_csv(record))))
+        codes = {row["Line Tax Code"] for row in rows}
+        assert "GST" not in codes, path.name
+        assert "GST/PST MB" not in codes, path.name
+        assert "HST ON" in codes, path.name
+        assert codes <= {"HST ON", "Out of Scope"}, path.name
+        line_tax = sum(
+            (Decimal(account["tax"]) for account in record["accounts"].values()),
+            Decimal("0.00"),
+        )
+        assert Decimal(record["gst_hst_tps"]) == line_tax, path.name
+        assert record["pst"] == "0.00", path.name
+        assert record["warnings"] == [], path.name
         check = invoice_verification(record)
         assert check["ok"] is True, path.name
-        assert check["gst_pst"] > 0, path.name
+        assert check["gst"] == Decimal("0.00"), path.name
+        assert check["gst_pst"] == Decimal("0.00"), path.name
 
 
 def test_rc_foods_store_keeps_the_original_promotion_and_uniform_accounts():
@@ -445,6 +477,38 @@ def test_missing_gst_and_pst_totals_are_zero():
     assert record["gst_hst_tps"] == "0.00"
     assert record["pst"] == "0.00"
     assert record["invoice_number"] == "31278945"
+
+
+def test_ontario_hst_without_a_percent_sign_reconciles():
+    text = """
+Invoice #:        31387771 RI
+Invoice Date:     10/23/2026
+Store #: 29036
+GST / HST / TPS 13.000 673.12
+Amount Due 10/30/2026 26,130.53
+G/L Acct  Description             QTY Shipped          Net        Tax        Total
+7001-001  FOOD                            100    25,457.41     673.12    26,130.53
+"""
+    record = parse_invoice_text(text)
+    assert record["gst_hst_tps"] == "673.12"
+    assert record["pst"] == "0.00"
+    assert record["warnings"] == []
+
+
+def test_ontario_hst_mismatch_names_hst():
+    text = """
+Invoice #:        31387771 RI
+Invoice Date:     10/23/2026
+Store #: 29036
+GST / HST / TPS 13.000 1.00
+Amount Due 10/30/2026 100.00
+G/L Acct  Description             QTY Shipped          Net        Tax        Total
+7001-001  FOOD                            100        10.00       1.00        11.00
+"""
+    record = parse_invoice_text(text)
+    assert record["warnings"] == [
+        "Net amounts plus HST equal 11.00, which does not match Total Order 100.00."
+    ]
 
 
 def test_missing_pst_alone_is_zero():
@@ -852,12 +916,12 @@ def test_bulk_csv_has_a_header_and_one_row_per_invoice(client):
 
 
 @pytest.mark.skipif(
-    not RD_PDFS or not MM_PDFS,
+    not RD_PDFS or not SAMPLE_PDF.is_file(),
     reason="Saskatchewan and Manitoba invoices are not in the repo",
 )
 def test_bulk_csv_keeps_each_invoice_pst_province(client):
     saskatchewan = RD_PDFS[0]
-    manitoba = MM_PDFS[0]
+    manitoba = SAMPLE_PDF
     uploads = [
         (BytesIO(saskatchewan.read_bytes()), saskatchewan.name),
         (BytesIO(manitoba.read_bytes()), manitoba.name),
@@ -877,6 +941,34 @@ def test_bulk_csv_keeps_each_invoice_pst_province(client):
     assert "GST/PST MB" not in sk_codes
     assert "GST/PST MB" in mb_codes
     assert "GST/PST SK" not in mb_codes
+    assert "HST ON" not in mb_codes
+
+
+@pytest.mark.skipif(len(MM_PDFS) < 2, reason="Guest First invoices are not in the repo")
+def test_bulk_csv_uses_hst_on_for_guest_first(client):
+    uploads = [
+        (BytesIO(path.read_bytes()), path.name) for path in MM_PDFS[:2]
+    ]
+    page = client.post(
+        "/bulk",
+        data={"files": uploads},
+        content_type="multipart/form-data",
+    )
+    assert page.status_code == 200
+    body = page.get_data(as_text=True)
+    assert "HST ON" in body
+    assert "HST " in body
+    assert "does not match Total Order" not in body
+    assert "Total − lines 0.00" in body
+    downloaded = client.post(
+        "/bulk?format=csv",
+        data={"files": [(BytesIO(path.read_bytes()), path.name) for path in MM_PDFS[:2]]},
+        content_type="multipart/form-data",
+    )
+    rows = list(csv.DictReader(StringIO(downloaded.get_data(as_text=True))))
+    assert rows
+    assert {row["Line Tax Code"] for row in rows} <= {"HST ON", "Out of Scope"}
+    assert "HST ON" in {row["Line Tax Code"] for row in rows}
 
 
 def test_bulk_keeps_successful_invoices_when_one_pdf_fails(client):
