@@ -172,6 +172,23 @@ def test_supplier_comes_from_remit_to():
     assert record["supplier"] == "EXAMPLE SUPPLIER LTD"
 
 
+@pytest.mark.parametrize("store_number", ["6210", "3983"])
+def test_chason_stores_use_the_hyphenated_supplier_name(store_number):
+    text = f"Store #: {store_number}\nRemit To: MARTIN-BROWER OF CANADA CO\n" + EXAMPLE_TEXT
+    record = parse_invoice_text(text)
+    assert record["supplier"] == "Martin-Brower of Canada"
+    rows = list(csv.DictReader(StringIO(to_csv(record))))
+    assert rows[0]["Supplier"] == "Martin-Brower of Canada"
+
+
+def test_other_stores_keep_the_unhyphenated_supplier_name():
+    text = "Store #: 26060\nRemit To: MARTIN-BROWER OF CANADA CO\n" + EXAMPLE_TEXT
+    record = parse_invoice_text(text)
+    assert record["supplier"] == "Martin Brower of Canada"
+    rows = list(csv.DictReader(StringIO(to_csv(record))))
+    assert rows[0]["Supplier"] == "Martin Brower of Canada"
+
+
 def test_store_code_comes_from_ship_to():
     text = (
         "Ship To: MCDONALD'S 26060                    Bill To:     "

@@ -25,8 +25,10 @@ KNOWN_ACCOUNTS = (
 )
 
 # Printed after "Remit To:" on this supplier's invoices. Example PDFs that
-# omit the line still export under this name.
+# omit the line still export under this name. Chason's QuickBooks vendor
+# uses a hyphen.
 DEFAULT_SUPPLIER = "Martin Brower of Canada"
+CHASON_SUPPLIER = "Martin-Brower of Canada"
 
 # Martin Brower G/L code -> BDPQ Automation account.
 SUPPLIER_TO_BDPQ = {
@@ -208,6 +210,7 @@ def parse_invoice_text(text):
             supplier = SUPPLIER_TO_BDPQ.get(supplier)
 
     store_number = store_match.group(1) if store_match else None
+    supplier = _supplier_for_store(supplier, store_number)
     pst, pst_province = _pst_total(pst_match)
     record = {
         "invoice_number": invoice_match.group(1),
@@ -392,6 +395,13 @@ def _line_tax_code(tax_code, pst_province):
     if tax_code == _GST_PST_TAX_CODE and pst_province:
         return f"GST/PST {pst_province}"
     return tax_code
+
+
+def _supplier_for_store(supplier, store_number):
+    """Chason's vendor name is hyphenated. Other clients are not."""
+    if store_number in CHASON_STORES and supplier == DEFAULT_SUPPLIER:
+        return CHASON_SUPPLIER
+    return supplier
 
 
 def _client_account(code, store_number):
