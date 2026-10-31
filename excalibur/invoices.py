@@ -53,7 +53,7 @@ TEAM_OUZZY_ACCOUNTS = {
 
 # Chason uses MB_TO_BDPQ. Chason uses different account numbers for
 # the same Martin Brower promotion and uniform lines.
-CHASON_STORES = frozenset({"6210", "3983"})
+CHASON_STORES = frozenset({"10822", "3983"})
 CHASON_ACCOUNTS = {
     "7428-001": "5350 Promotion - Martin Brower",
     "7440-001": "5420 Uniforms",
