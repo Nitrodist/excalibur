@@ -31,7 +31,7 @@ DEFAULT_SUPPLIER = "Martin Brower of Canada"
 CHASON_SUPPLIER = "Martin-Brower of Canada Co"
 TASS_SUPPLIER = "Martin-Brower of Canada Co"
 EINARSON_SUPPLIER = "Martin-Brower of Canada Co"
-GUEST_FIRST_SUPPLIER = "Martin-Brower of Canada Co"
+GUEST_FIRST_SUPPLIER = "Martin-Brower of Canada Co."
 
 # Martin Brower G/L code -> BDPQ Automation account.
 SUPPLIER_TO_BDPQ = {
