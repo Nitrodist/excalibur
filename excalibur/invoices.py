@@ -30,6 +30,7 @@ KNOWN_ACCOUNTS = (
 DEFAULT_SUPPLIER = "Martin Brower of Canada"
 CHASON_SUPPLIER = "Martin-Brower of Canada Co"
 TASS_SUPPLIER = "Martin-Brower of Canada Co"
+EINARSON_SUPPLIER = "Martin-Brower of Canada Co"
 
 # Martin Brower G/L code -> BDPQ Automation account.
 SUPPLIER_TO_BDPQ = {
@@ -66,6 +67,17 @@ TASS_ACCOUNTS = {
     "7428-001": "5350 Promotion - Martin Brower",
     "7440-001": "5420 Uniforms",
 }
+# Chason uses MB_TO_BDPQ. Chason uses different account numbers for
+# the same Martin Brower promotion and uniform lines.
+EINARSON_STORES = frozenset({"40806", "7504"})
+EINARSON_ACCOUNTS = {
+    "7428-001": "5350 Promotion - Martin Brower",
+    "7440-001": "5420 Uniforms",
+}
+
+
+
+
 # BDPQ Automation account -> QuickBooks line description.
 BDPQ_LINE_DESCRIPTION = {
     "5020 Food Purchases": "Food Purchases",
@@ -411,6 +423,8 @@ def _supplier_for_store(supplier, store_number):
         return CHASON_SUPPLIER
     if store_number in TASS_STORES and supplier == DEFAULT_SUPPLIER:
         return TASS_SUPPLIER
+    if store_number in EINARSON_STORES and supplier == DEFAULT_SUPPLIER:
+        return EINARSON_SUPPLIER
     return supplier
 
 
@@ -421,6 +435,8 @@ def _client_account(code, store_number):
         return CHASON_ACCOUNTS.get(code)
     if store_number in TASS_STORES:
         return TASS_ACCOUNTS.get(code)
+    if store_number in EINARSON_STORES:
+        return EINARSON_ACCOUNTS.get(code)
     return None
 
 
